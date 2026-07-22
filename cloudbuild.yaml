@@ -1,0 +1,47 @@
+steps:
+  # Step 1: Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'me-central1-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:$COMMIT_SHA'
+      - '-t'
+      - 'me-central1-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:latest'
+      - '.'
+
+  # Step 2: Push to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - 'me-central1-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web'
+
+  # Step 3: Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'pogo-arcade'
+      - '--image'
+      - 'me-central1-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:$COMMIT_SHA'
+      - '--region'
+      - 'me-central1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--port'
+      - '8080'
+      - '--memory'
+      - '256Mi'
+      - '--min-instances'
+      - '0'
+      - '--max-instances'
+      - '10'
+
+images:
+  - 'me-central1-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:$COMMIT_SHA'
+  - 'me-central1-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

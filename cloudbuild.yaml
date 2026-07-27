@@ -4,19 +4,19 @@ steps:
     args:
       - 'build'
       - '-t'
-      - 'me-central1-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:$COMMIT_SHA'
+      - 'us-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:$COMMIT_SHA'
       - '-t'
-      - 'me-central1-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:latest'
+      - 'us-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:latest'
       - '.'
 
-  # Step 2: Push to Artifact Registry
+  # Step 2: Push to Artifact Registry (us multi-region)
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
       - '--all-tags'
-      - 'me-central1-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web'
+      - 'us-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web'
 
-  # Step 3: Deploy to Cloud Run
+  # Step 3: Deploy to Cloud Run in us-central1 (supports domain mapping)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:
@@ -24,9 +24,9 @@ steps:
       - 'deploy'
       - 'pogo-arcade'
       - '--image'
-      - 'me-central1-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:$COMMIT_SHA'
+      - 'us-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:$COMMIT_SHA'
       - '--region'
-      - 'me-central1'
+      - 'us-central1'
       - '--platform'
       - 'managed'
       - '--allow-unauthenticated'
@@ -40,8 +40,8 @@ steps:
       - '10'
 
 images:
-  - 'me-central1-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:$COMMIT_SHA'
-  - 'me-central1-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:latest'
+  - 'us-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:$COMMIT_SHA'
+  - 'us-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:latest'
 
 options:
   logging: CLOUD_LOGGING_ONLY

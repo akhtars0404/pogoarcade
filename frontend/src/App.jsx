@@ -135,6 +135,11 @@ function AuthScreen() {
           <input placeholder="Username" value={form.username} onChange={e => upd("username", e.target.value)} style={inputStyle} />
           {tab === "signup" && <input placeholder="Email (optional)" type="email" value={form.email} onChange={e => upd("email", e.target.value)} style={inputStyle} />}
           <input placeholder="Password" type="password" value={form.password} onChange={e => upd("password", e.target.value)} style={inputStyle} onKeyDown={e => e.key === "Enter" && submit()} />
+          {tab === "login" && (
+            <button onClick={() => navigate("forgotpassword")} style={{ display: "block", marginLeft: "auto", marginTop: -6, marginBottom: 12, padding: 0, background: "none", border: "none", color: C.cyan, fontSize: 12, cursor: "pointer", fontFamily: F }}>
+              Forgot password?
+            </button>
+          )}
           {error && <div style={{ color: C.rose, fontSize: 13, marginBottom: 12, padding: "8px 12px", background: `${C.rose}12`, borderRadius: 8 }}>{error}</div>}
           <button onClick={submit} disabled={busy} style={{ width: "100%", padding: "12px", borderRadius: 10, background: C.violet, color: "#fff", border: "none", fontSize: 15, fontWeight: 700, cursor: "pointer", opacity: busy ? 0.6 : 1, fontFamily: F }}>
             {busy ? "Please wait..." : tab === "login" ? "Sign In" : "Create Account"}
@@ -144,6 +149,115 @@ function AuthScreen() {
         <button onClick={() => navigate("portal")} style={{ display: "block", width: "100%", textAlign: "center", marginTop: 16, padding: "10px", background: "none", border: "none", color: C.textM, fontSize: 13, cursor: "pointer", fontFamily: F }}>
           ← Back to games (no account needed for solo play)
         </button>
+      </div>
+    </main>
+  );
+}
+
+// ══════════════════════════════════════
+// FORGOT / RESET PASSWORD
+// Only works for accounts that supplied an email at signup (it's optional).
+// The backend always returns the same generic message regardless of whether
+// the email matches an account, so this page can't be used to enumerate
+// registered emails.
+// ══════════════════════════════════════
+function ForgotPassword() {
+  const { navigate } = useNav();
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState("");
+  const inputStyle = { width: "100%", padding: "12px 16px", borderRadius: 10, border: `1px solid ${C.border}`, background: "rgba(0,0,0,0.4)", color: C.text, fontSize: 14, boxSizing: "border-box", marginBottom: 12, outline: "none", fontFamily: F };
+
+  const submit = async () => {
+    if (!email.trim()) return;
+    setBusy(true); setError("");
+    try {
+      await api.forgotPassword(email.trim());
+      setDone(true);
+    } catch (e) {
+      setError(e.message || "Something went wrong — try again");
+    }
+    setBusy(false);
+  };
+
+  return (
+    <main style={{ minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F, padding: "40px 16px" }}>
+      <div style={{ width: "100%", maxWidth: 400 }}>
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div style={{ fontSize: 48, marginBottom: 8 }}>🔑</div>
+          <h1 style={{ fontSize: 24, fontWeight: 900, margin: "0 0 4px", color: C.text }}>Reset your password</h1>
+          <p style={{ color: C.textM, fontSize: 14, margin: 0 }}>Enter the email you signed up with and we'll send you a reset link.</p>
+        </div>
+        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: 24 }}>
+          {done ? (
+            <div style={{ textAlign: "center", padding: "8px 0" }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>📬</div>
+              <p style={{ color: C.text, fontSize: 14, lineHeight: 1.6 }}>If an account with that email exists, we've sent a password reset link. Check your inbox (and spam folder) — the link expires in 1 hour.</p>
+            </div>
+          ) : (<>
+            <input placeholder="Email address" type="email" value={email} onChange={e => setEmail(e.target.value)} style={inputStyle} onKeyDown={e => e.key === "Enter" && submit()} />
+            {error && <div style={{ color: C.rose, fontSize: 13, marginBottom: 12, padding: "8px 12px", background: `${C.rose}12`, borderRadius: 8 }}>{error}</div>}
+            <button onClick={submit} disabled={busy} style={{ width: "100%", padding: "12px", borderRadius: 10, background: C.violet, color: "#fff", border: "none", fontSize: 15, fontWeight: 700, cursor: "pointer", opacity: busy ? 0.6 : 1, fontFamily: F }}>
+              {busy ? "Sending..." : "Send Reset Link"}
+            </button>
+          </>)}
+        </div>
+        <button onClick={() => navigate("auth")} style={{ display: "block", width: "100%", textAlign: "center", marginTop: 16, padding: "10px", background: "none", border: "none", color: C.textM, fontSize: 13, cursor: "pointer", fontFamily: F }}>
+          ← Back to sign in
+        </button>
+      </div>
+    </main>
+  );
+}
+
+function ResetPassword() {
+  const { navigate } = useNav();
+  const { token } = useParams();
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState("");
+  const inputStyle = { width: "100%", padding: "12px 16px", borderRadius: 10, border: `1px solid ${C.border}`, background: "rgba(0,0,0,0.4)", color: C.text, fontSize: 14, boxSizing: "border-box", marginBottom: 12, outline: "none", fontFamily: F };
+
+  const submit = async () => {
+    setError("");
+    if (password.length < 4) { setError("Password must be at least 4 characters"); return; }
+    if (password !== confirm) { setError("Passwords don't match"); return; }
+    setBusy(true);
+    try {
+      await api.resetPassword(token, password);
+      setDone(true);
+    } catch (e) {
+      setError(e.message || "Something went wrong — try again");
+    }
+    setBusy(false);
+  };
+
+  return (
+    <main style={{ minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: F, padding: "40px 16px" }}>
+      <div style={{ width: "100%", maxWidth: 400 }}>
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div style={{ fontSize: 48, marginBottom: 8 }}>🔑</div>
+          <h1 style={{ fontSize: 24, fontWeight: 900, margin: "0 0 4px", color: C.text }}>Choose a new password</h1>
+        </div>
+        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: 24 }}>
+          {done ? (
+            <div style={{ textAlign: "center", padding: "8px 0" }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
+              <p style={{ color: C.text, fontSize: 14, marginBottom: 16 }}>Your password has been reset.</p>
+              <button onClick={() => navigate("auth")} style={{ padding: "10px 24px", borderRadius: 10, background: C.violet, color: "#fff", border: "none", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: F }}>Sign In</button>
+            </div>
+          ) : (<>
+            <input placeholder="New password" type="password" value={password} onChange={e => setPassword(e.target.value)} style={inputStyle} />
+            <input placeholder="Confirm new password" type="password" value={confirm} onChange={e => setConfirm(e.target.value)} style={inputStyle} onKeyDown={e => e.key === "Enter" && submit()} />
+            {error && <div style={{ color: C.rose, fontSize: 13, marginBottom: 12, padding: "8px 12px", background: `${C.rose}12`, borderRadius: 8 }}>{error}</div>}
+            <button onClick={submit} disabled={busy} style={{ width: "100%", padding: "12px", borderRadius: 10, background: C.violet, color: "#fff", border: "none", fontSize: 15, fontWeight: 700, cursor: "pointer", opacity: busy ? 0.6 : 1, fontFamily: F }}>
+              {busy ? "Saving..." : "Set New Password"}
+            </button>
+          </>)}
+        </div>
       </div>
     </main>
   );
@@ -2337,6 +2451,7 @@ const PAGE_TO_PATH = {
   portal: "/", auth: "/signin", kidszone: "/kids", leaderboard: "/leaderboard",
   events: "/events", about: "/about", contact: "/contact", privacy: "/privacy",
   terms: "/terms", disclaimer: "/disclaimer", dashboard: "/dashboard", admin: "/admin",
+  forgotpassword: "/forgot-password",
 };
 function pageKeyToPath(pageKey) {
   if (pageKey.startsWith("game:")) return `/games/${pageKey.slice(5)}`;
@@ -2391,6 +2506,8 @@ function AppShell() {
         <Route path="/" element={<Portal />} />
         <Route path="/games/:id" element={<GameRoute />} />
         <Route path="/signin" element={<AuthScreen />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password/:token" element={<ResetPassword />} />
         <Route path="/kids" element={<KidsZone />} />
         <Route path="/leaderboard" element={<Leaderboard />} />
         <Route path="/events" element={<Events />} />

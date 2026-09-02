@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   getUserByUsername,
+  getUserByEmail,
   createUser,
   recordScore,
   getUserScores,
@@ -13,8 +14,21 @@ import {
   getUserLoginHistory,
   setUserDisabled,
   deleteUserCascade,
+  createPasswordReset,
+  getValidPasswordReset,
+  consumePasswordReset,
+  updateUserPassword,
 } from "./db.js";
-import { hashPassword, verifyPassword, signToken, requireAuth, requireAdmin } from "./auth.js";
+import {
+  hashPassword,
+  verifyPassword,
+  signToken,
+  requireAuth,
+  requireAdmin,
+  generateResetToken,
+  hashResetToken,
+} from "./auth.js";
+import { sendPasswordResetEmail } from "./email.js";
 
 export const router = Router();
 
@@ -61,6 +75,9 @@ router.post("/auth/signup", (req, res) => {
   if (getUserByUsername(username)) {
     return res.status(409).json({ error: "Username already taken" });
   }
+  if (email && getUserByEmail(email)) {
+    return res.status(409).json({ error: "An account with that email already exists" });
+  }
 
   let user = createUser({
     username,
@@ -93,6 +110,47 @@ router.get("/auth/me", requireAuth, (req, res) => {
   const user = getUserById(req.userId);
   if (!user) return res.status(404).json({ error: "User not found" });
   res.json({ user: publicUser(user) });
+});
+
+function siteOrigin(req) {
+  return process.env.SITE_URL || `${req.protocol}://${req.get("host")}`;
+}
+
+// Always responds with the same generic message whether or not the email
+// matches an account — otherwise this endpoint could be used to check which
+// emails are registered. Only accounts that supplied an email can reset this
+// way (email is optional at signup); an account with no email on file simply
+// never gets a token, silently, from the caller's point of view.
+router.post("/auth/forgot-password", async (req, res) => {
+  const { email } = req.body || {};
+  const generic = { ok: true, message: "If an account with that email exists, we've sent a password reset link." };
+  if (!email || !EMAIL_RE.test(String(email).trim())) return res.json(generic);
+
+  const user = getUserByEmail(email);
+  if (user && !user.disabled) {
+    const token = generateResetToken();
+    createPasswordReset(user.id, hashResetToken(token));
+    const resetUrl = `${siteOrigin(req)}/reset-password/${token}`;
+    await sendPasswordResetEmail(user.email, resetUrl);
+  }
+  res.json(generic);
+});
+
+router.post("/auth/reset-password", (req, res) => {
+  const { token, password } = req.body || {};
+  if (!token || !password) {
+    return res.status(400).json({ error: "Token and new password are required" });
+  }
+  if (String(password).length < 4) {
+    return res.status(400).json({ error: "Password must be at least 4 characters" });
+  }
+  const reset = getValidPasswordReset(hashResetToken(token));
+  if (!reset) {
+    return res.status(400).json({ error: "This reset link is invalid or has expired — request a new one" });
+  }
+  updateUserPassword(reset.user_id, hashPassword(password));
+  consumePasswordReset(reset.id);
+  res.json({ ok: true });
 });
 
 router.post("/scores", requireAuth, (req, res) => {

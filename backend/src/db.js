@@ -75,10 +75,27 @@ CREATE TABLE IF NOT EXISTS login_log (
   user_agent TEXT,
   created_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS password_resets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  token_hash TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  used INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
 `);
 
 export function getUserByUsername(username) {
   return db.prepare("SELECT * FROM users WHERE username = ?").get(username.toLowerCase());
+}
+
+// Email isn't guaranteed unique at the DB level (it's optional, added after
+// launch), but createUser() rejects a signup that reuses an email already on
+// another account, so in practice this returns at most one active match.
+export function getUserByEmail(email) {
+  if (!email) return null;
+  return db.prepare("SELECT * FROM users WHERE email = ?").get(String(email).trim().toLowerCase());
 }
 
 export function getUserById(id) {
@@ -94,7 +111,7 @@ export function createUser({ username, passwordHash, displayName, email }) {
     passwordHash,
     displayName,
     Date.now(),
-    email ? String(email).trim().slice(0, 120) : null
+    email ? String(email).trim().toLowerCase().slice(0, 120) : null
   );
   return getUserById(info.lastInsertRowid);
 }
@@ -201,4 +218,32 @@ export function getGameLeaderboard(gameId, limit = 50) {
        WHERE s.game_id = ? ORDER BY s.points DESC LIMIT ?`
     )
     .all(gameId, limit);
+}
+
+// --- Password reset -------------------------------------------------------
+// Tokens are stored only as a SHA-256 hash (see auth.js hashResetToken) so a
+// DB read alone can't be used to reset someone's password. Each token is
+// single-use and expires after RESET_TOKEN_TTL_MS.
+export const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+export function createPasswordReset(userId, tokenHash) {
+  db.prepare(
+    "INSERT INTO password_resets (user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?)"
+  ).run(userId, tokenHash, Date.now() + RESET_TOKEN_TTL_MS, Date.now());
+}
+
+export function getValidPasswordReset(tokenHash) {
+  return db
+    .prepare(
+      "SELECT * FROM password_resets WHERE token_hash = ? AND used = 0 AND expires_at > ? ORDER BY id DESC LIMIT 1"
+    )
+    .get(tokenHash, Date.now());
+}
+
+export function consumePasswordReset(id) {
+  db.prepare("UPDATE password_resets SET used = 1 WHERE id = ?").run(id);
+}
+
+export function updateUserPassword(userId, passwordHash) {
+  db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(passwordHash, userId);
 }

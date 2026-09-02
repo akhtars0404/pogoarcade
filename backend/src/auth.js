@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import crypto from "node:crypto";
 import { getUserById } from "./db.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
@@ -58,4 +59,14 @@ export function requireAdmin(req, res, next) {
 // Same check, usable for Socket.io handshake auth.
 export function verifySocketToken(token) {
   return token ? verifyToken(token) : null;
+}
+
+// --- Password reset tokens -------------------------------------------------
+// The raw token goes out in the emailed link; only its hash is ever stored,
+// so a database read alone can't be replayed to reset someone's password.
+export function generateResetToken() {
+  return crypto.randomBytes(32).toString("hex");
+}
+export function hashResetToken(token) {
+  return crypto.createHash("sha256").update(token).digest("hex");
 }

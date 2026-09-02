@@ -124,6 +124,43 @@ gcloud builds triggers create github \
   --name=pogo-arcade-full-rebuild
 ```
 
+### Password reset (Resend) setup — optional, do this whenever you want real email delivery
+
+The forgot-password flow (`POST /api/auth/forgot-password` → emailed link →
+`POST /api/auth/reset-password`) is already deployed and working end to
+end — it just needs an email-sending provider wired in before it can
+actually deliver a link. Without it, requests to `/forgot-password` still
+return success (by design — the response never reveals whether an email
+is registered), but no email goes out; `backend/src/email.js` logs a
+warning server-side so this is easy to notice, not a silent failure.
+
+This uses [Resend](https://resend.com) (a free account covers this site's
+volume many times over — 3,000 emails/month / 100/day):
+
+1. Sign up at resend.com, then in their dashboard go to **Domains → Add
+   Domain** and add `pogoarcade.com`. It'll give you a few DNS records
+   (TXT/MX/CNAME) to add wherever `pogoarcade.com`'s DNS is managed (the
+   same place you pointed the domain at this Cloud Run service). Domain
+   verification usually takes a few minutes to a few hours.
+2. Once verified, go to **API Keys → Create API Key** and copy it.
+3. Store it in Secret Manager the same way as the JWT secret:
+   ```bash
+   echo -n "re_your_actual_key_here" | gcloud secrets create pogo-resend-key --data-file=-
+   PROJECT_NUMBER=$(gcloud projects describe "$(gcloud config get-value project)" --format='value(projectNumber)')
+   gcloud secrets add-iam-policy-binding pogo-resend-key \
+     --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+     --role="roles/secretmanager.secretAccessor"
+   ```
+4. Wire it into the Cloud Run service (`RESEND_FROM_EMAIL` must be an
+   address on the domain you just verified):
+   ```bash
+   gcloud run services update pogo-arcade --region=us-central1 \
+     --update-secrets='RESEND_API_KEY=pogo-resend-key:latest' \
+     --update-env-vars='RESEND_FROM_EMAIL=PoGo Arcade <noreply@pogoarcade.com>'
+   ```
+That's it — no code changes or redeploy needed, `backend/src/email.js`
+picks up both env vars at request time.
+
 After that, every push to whichever branch a trigger watches runs
 `cloudbuild.yaml` automatically: builds the image, pushes it to Artifact
 Registry, and deploys it to the `pogo-arcade` Cloud Run service in
@@ -168,9 +205,14 @@ Still to do before submitting:
 
 - **Physics games (Carrom, Pool, Snooker) are solo-only** — see the
   multiplayer section above.
-- **No password reset flow** — if a user forgets their password there's
-  currently no email-based recovery (there's no email collection at all,
-  by design, per the Privacy Policy). Add one if you want it.
+- **Password reset needs Resend configured to actually deliver email** —
+  the `/forgot-password` → email link → `/reset-password/:token` flow is
+  fully built (see "Password reset (Resend) setup" below), but until
+  `RESEND_API_KEY`/`RESEND_FROM_EMAIL` are set, requests succeed silently
+  without sending anything (the API always returns the same generic
+  message either way, so this fails safe rather than looking broken to a
+  user). Also: only accounts that supplied an email at signup can use it —
+  email is optional, per the Privacy Policy.
 - **No rate limiting** on the auth endpoints — add something like
   `express-rate-limit` before this is public, to blunt brute-force login
   attempts.

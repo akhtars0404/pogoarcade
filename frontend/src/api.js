@@ -44,6 +44,8 @@ export const api = {
   login: (username, password) =>
     request("/auth/login", { method: "POST", body: { username, password } }),
   me: () => request("/auth/me", { auth: true }),
+  forgotPassword: (email) => request("/auth/forgot-password", { method: "POST", body: { email } }),
+  resetPassword: (token, password) => request("/auth/reset-password", { method: "POST", body: { token, password } }),
   recordScore: (gameId, points) =>
     request("/scores", { method: "POST", auth: true, body: { gameId, points } }),
   leaderboard: () => request("/leaderboard"),

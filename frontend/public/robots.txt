@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://pogoarcade.com/sitemap.xml

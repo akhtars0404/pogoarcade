@@ -69,62 +69,75 @@ npm run dev                  # http://localhost:5173
 Sign up a test account, and open the same page in a second browser (or an
 incognito window) to test online multiplayer against yourself.
 
-## Deploying to pogoarcade.com
+## Deploying to pogoarcade.com (GCP Cloud Build → Cloud Run)
 
-### 1. Backend first (the frontend needs its URL)
+This repo already has a working Cloud Build → Artifact Registry → Cloud Run
+pipeline from an earlier, simpler version of the site (static-only, no
+accounts). This branch (`full-rebuild`) adapts that same pipeline for the
+full app instead of replacing it with a different host: **one Dockerfile,
+one Cloud Run service**, same as before — it just now builds and runs both
+the frontend and backend together (see the root `Dockerfile`: it builds
+`frontend/` into static assets, then the single Node process in `backend/`
+serves the API, Socket.io, *and* those static assets, all from one
+container). `cloudbuild.yaml` at the repo root builds and deploys it.
 
-The backend needs to be an always-on process with persistent disk (for the
-SQLite file), so a serverless platform (Vercel functions, Netlify
-functions) won't work for it — use a small VM/container host instead.
+### Why one instance, not autoscaled
 
-**Render.com (easiest, has a free tier):**
-1. Push this repo to GitHub.
-2. New → Web Service → pick the repo, set the root directory to `backend`.
-3. Render will detect `render.yaml` and pre-fill the build/start commands
-   and a 1GB persistent disk mounted at `/var/data`. Set `CORS_ORIGIN` to
-   `https://pogoarcade.com` (and `https://www.pogoarcade.com` if you'll use
-   the www subdomain — comma-separate isn't supported by the `cors` package
-   directly, so switch `CORS_ORIGIN` handling to an array if you need both).
-4. Deploy. Note the resulting URL, e.g. `https://pogoarcade-backend.onrender.com`.
+The backend keeps user accounts and scores in a local SQLite file inside
+the container. Cloud Run can run many instances of a service in parallel
+and can scale a service to zero when idle — either of those would fragment
+or wipe that data (multiple instances = multiple disconnected databases;
+scale-to-zero = a fresh, empty disk on the next cold start). `cloudbuild.yaml`
+pins the service to exactly **one always-on instance**
+(`--min-instances 1 --max-instances 1`) so the SQLite file stays put across
+normal traffic. The trade-off, carried over from the original design: data
+still resets on a *redeploy* (a new container image = a new empty disk), and
+this can't scale past one instance. That's fine while the site is new; if
+it later needs both real growth and zero data-loss risk, migrate to Cloud
+SQL (Postgres) — a bigger change, not needed to launch.
 
-**Railway / Fly.io / any Docker host:** use the included `Dockerfile`. Set
-env vars `JWT_SECRET`, `CORS_ORIGIN`, and mount a volume for `/app/data` (or
-set `DB_PATH` to wherever your volume is mounted) so the database survives
-restarts and redeploys.
+### First-time GCP setup (one-time only — run these in Cloud Shell)
 
-If you'd rather point `api.pogoarcade.com` at this service, add that as a
-custom domain on whichever host you pick, once DNS is set up (step 3).
+Open [Cloud Shell](https://shell.cloud.google.com) (it's pre-authenticated
+as you, with `gcloud` already installed — nothing to install locally), make
+sure it's pointed at the right project (`gcloud config set project
+YOUR_PROJECT_ID`), then run:
 
-### 2. Frontend
+```bash
+# 1. Create a random JWT signing secret and store it in Secret Manager
+#    (never commit this to the repo).
+openssl rand -base64 32 | gcloud secrets create pogo-jwt-secret --data-file=-
 
-**Vercel (recommended):**
-1. New Project → import the repo → set root directory to `frontend`.
-2. Framework preset: Vite. Build command `npm run build`, output `dist`
-   (Vercel auto-detects these).
-3. Add environment variables:
-   - `VITE_API_URL` = your backend URL (e.g. `https://api.pogoarcade.com`)
-   - `VITE_SOCKET_URL` = same value (Socket.io reuses the same server)
-4. Deploy. `vercel.json` is already set up to rewrite all paths to
-   `index.html` so client-side routes like `/games/chess` work on refresh
-   and direct link.
+# 2. Let Cloud Run's runtime service account read that secret.
+PROJECT_NUMBER=$(gcloud projects describe "$(gcloud config get-value project)" --format='value(projectNumber)')
+gcloud secrets add-iam-policy-binding pogo-jwt-secret \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
 
-**Netlify** works the same way — `netlify.toml` is included with the
-equivalent redirect rule.
+# 3. (Only needed once — skip if a trigger already deploys this repo on
+#    push to main.) Point a Cloud Build trigger at this branch so pushes to
+#    full-rebuild deploy automatically too, for testing before it's merged:
+gcloud builds triggers create github \
+  --repo-name=pogoarcade --repo-owner=akhtars0404 \
+  --branch-pattern="^full-rebuild$" \
+  --build-config=cloudbuild.yaml \
+  --name=pogo-arcade-full-rebuild
+```
 
-### 3. Point pogoarcade.com at both
+After that, every push to whichever branch a trigger watches runs
+`cloudbuild.yaml` automatically: builds the image, pushes it to Artifact
+Registry, and deploys it to the `pogo-arcade` Cloud Run service in
+`us-central1` — the same service the original pipeline used, so any
+existing domain mapping for `pogoarcade.com` keeps working without
+re-pointing DNS.
 
-In your domain registrar's DNS settings:
-- `pogoarcade.com` (and `www`) → your frontend host's instructions (usually
-  a couple of A/CNAME records — Vercel/Netlify show you the exact records
-  once you add the custom domain in their dashboard).
-- `api.pogoarcade.com` → CNAME to your backend host, if you gave it a
-  custom domain. Otherwise the frontend can just call the host's default
-  URL (e.g. `*.onrender.com`) directly via `VITE_API_URL` — a custom
-  subdomain is a nice-to-have, not required.
-- Update `CORS_ORIGIN` on the backend and `VITE_API_URL`/`VITE_SOCKET_URL`
-  on the frontend to match whatever you land on, and redeploy both.
+To trigger a deploy manually instead of waiting on a push, from Cloud
+Shell inside a checkout of this repo/branch:
+```bash
+gcloud builds submit --config=cloudbuild.yaml .
+```
 
-### 4. Before applying for AdSense
+### Before applying for AdSense
 
 This build already has the structural pieces AdSense reviewers look for:
 Privacy Policy, Terms, Disclaimer, About, Contact, a cookie consent banner,

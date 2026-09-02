@@ -1,6 +1,9 @@
-// Talks to the PoGo Arcade backend (see /backend). Set VITE_API_URL in
-// production (e.g. https://api.pogoarcade.com); defaults to localhost for dev.
-export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000";
+// Talks to the PoGo Arcade backend (see /backend). In production the backend
+// serves this frontend itself (same Cloud Run service), so API calls default
+// to same-origin (empty string = relative URLs). Local dev overrides this via
+// frontend/.env (VITE_API_URL=http://localhost:4000) since the Vite dev
+// server and the backend run as two separate processes/ports there.
+export const API_URL = import.meta.env.VITE_API_URL || "";
 export const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || API_URL;
 
 const TOKEN_KEY = "pogoarcade_token";

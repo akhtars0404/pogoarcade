@@ -1,0 +1,62 @@
+steps:
+  # Step 1: Build the Docker image (now builds frontend + backend together —
+  # see the root Dockerfile)
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:$COMMIT_SHA'
+      - '-t'
+      - 'us-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:latest'
+      - '.'
+
+  # Step 2: Push to Artifact Registry (us multi-region)
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - 'us-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web'
+
+  # Step 3: Deploy to Cloud Run in us-central1 (supports domain mapping).
+  # min-instances=1/max-instances=1 pins this to exactly one always-on
+  # instance, since the backend keeps its user/score database in a local
+  # SQLite file on the container's disk — running more than one instance
+  # (or scaling to zero between requests) would fragment or lose that data.
+  # See README.md for the trade-offs and the path to Cloud SQL later.
+  #
+  # --update-env-vars / --update-secrets MERGE into the service's existing
+  # config instead of replacing it, so JWT_SECRET (set once, manually or via
+  # Secret Manager — see README "First-time GCP setup") survives every
+  # automated redeploy from this pipeline.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'pogo-arcade'
+      - '--image'
+      - 'us-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:$COMMIT_SHA'
+      - '--region'
+      - 'us-central1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--port'
+      - '8080'
+      - '--memory'
+      - '512Mi'
+      - '--min-instances'
+      - '1'
+      - '--max-instances'
+      - '1'
+      - '--update-env-vars'
+      - 'NODE_ENV=production,DB_PATH=/app/data/pogoarcade.db,CORS_ORIGIN=*'
+      - '--update-secrets'
+      - 'JWT_SECRET=pogo-jwt-secret:latest'
+
+images:
+  - 'us-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:$COMMIT_SHA'
+  - 'us-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

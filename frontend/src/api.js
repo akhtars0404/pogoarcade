@@ -38,8 +38,9 @@ async function request(path, { method = "GET", body, auth = false } = {}) {
 }
 
 export const api = {
-  signup: (username, password, displayName) =>
-    request("/auth/signup", { method: "POST", body: { username, password, displayName } }),
+  // email is optional — passed through only if the caller supplies one.
+  signup: (username, password, displayName, email) =>
+    request("/auth/signup", { method: "POST", body: { username, password, displayName, email: email || undefined } }),
   login: (username, password) =>
     request("/auth/login", { method: "POST", body: { username, password } }),
   me: () => request("/auth/me", { auth: true }),
@@ -47,4 +48,11 @@ export const api = {
     request("/scores", { method: "POST", auth: true, body: { gameId, points } }),
   leaderboard: () => request("/leaderboard"),
   gameLeaderboard: (gameId) => request(`/leaderboard/${gameId}`),
+
+  // --- Admin (requires an admin-role account) ---
+  adminUsers: () => request("/admin/users", { auth: true }),
+  adminUserLogins: (id) => request(`/admin/users/${id}/logins`, { auth: true }),
+  adminDisableUser: (id) => request(`/admin/users/${id}/disable`, { method: "POST", auth: true }),
+  adminEnableUser: (id) => request(`/admin/users/${id}/enable`, { method: "POST", auth: true }),
+  adminDeleteUser: (id) => request(`/admin/users/${id}`, { method: "DELETE", auth: true }),
 };

@@ -49,6 +49,34 @@ CREATE TABLE IF NOT EXISTS events (
 );
 `);
 
+// --- Safe migration: add admin-panel columns to an already-populated
+// `users` table. SQLite has no "ADD COLUMN IF NOT EXISTS", so we check
+// PRAGMA table_info first and only add what's missing. Runs on every boot;
+// a no-op once the columns already exist.
+const userColumns = new Set(db.prepare("PRAGMA table_info(users)").all().map((c) => c.name));
+if (!userColumns.has("email")) {
+  db.exec("ALTER TABLE users ADD COLUMN email TEXT");
+}
+if (!userColumns.has("role")) {
+  db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
+}
+if (!userColumns.has("disabled")) {
+  db.exec("ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0");
+}
+if (!userColumns.has("last_login_at")) {
+  db.exec("ALTER TABLE users ADD COLUMN last_login_at INTEGER");
+}
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS login_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  ip TEXT,
+  user_agent TEXT,
+  created_at INTEGER NOT NULL
+);
+`);
+
 export function getUserByUsername(username) {
   return db.prepare("SELECT * FROM users WHERE username = ?").get(username.toLowerCase());
 }
@@ -57,13 +85,75 @@ export function getUserById(id) {
   return db.prepare("SELECT * FROM users WHERE id = ?").get(id);
 }
 
-export function createUser({ username, passwordHash, displayName }) {
+export function createUser({ username, passwordHash, displayName, email }) {
   const stmt = db.prepare(
-    "INSERT INTO users (username, password_hash, display_name, created_at) VALUES (?, ?, ?, ?)"
+    "INSERT INTO users (username, password_hash, display_name, created_at, email) VALUES (?, ?, ?, ?, ?)"
   );
-  const info = stmt.run(username.toLowerCase(), passwordHash, displayName, Date.now());
+  const info = stmt.run(
+    username.toLowerCase(),
+    passwordHash,
+    displayName,
+    Date.now(),
+    email ? String(email).trim().slice(0, 120) : null
+  );
   return getUserById(info.lastInsertRowid);
 }
+
+// Self-healing admin bootstrap: if this username matches ADMIN_USERNAME,
+// promote them to admin. Safe to call on every login/signup — it's a no-op
+// once the account already has the role (or the env var isn't set / doesn't
+// match). This means granting the first admin is just "set an env var and
+// log in", no direct DB access or redeploy-time seeding required.
+export function maybePromoteAdmin(user) {
+  const adminUsername = (process.env.ADMIN_USERNAME || "").trim().toLowerCase();
+  if (!adminUsername) return user;
+  if (user.username !== adminUsername) return user;
+  if (user.role === "admin") return user;
+  db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").run(user.id);
+  return getUserById(user.id);
+}
+
+export function recordLogin(userId, { ip, userAgent } = {}) {
+  db.prepare(
+    "INSERT INTO login_log (user_id, ip, user_agent, created_at) VALUES (?, ?, ?, ?)"
+  ).run(userId, ip || null, userAgent ? String(userAgent).slice(0, 300) : null, Date.now());
+  db.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").run(Date.now(), userId);
+}
+
+// --- Admin helpers -------------------------------------------------------
+
+export function getAllUsersAdmin() {
+  return db
+    .prepare(
+      `SELECT u.id, u.username, u.display_name, u.email, u.role, u.disabled,
+              u.created_at, u.last_login_at, u.games_played, u.total_score,
+              (SELECT COUNT(*) FROM login_log l WHERE l.user_id = u.id) AS login_count
+       FROM users u ORDER BY u.created_at DESC`
+    )
+    .all();
+}
+
+export function getUserLoginHistory(userId, limit = 100) {
+  return db
+    .prepare(
+      "SELECT ip, user_agent, created_at FROM login_log WHERE user_id = ? ORDER BY created_at DESC LIMIT ?"
+    )
+    .all(userId, limit);
+}
+
+export function setUserDisabled(userId, disabled) {
+  db.prepare("UPDATE users SET disabled = ? WHERE id = ?").run(disabled ? 1 : 0, userId);
+  return getUserById(userId);
+}
+
+// Full cascade delete: account + login history + scores + score log.
+// Wrapped in a transaction so it's all-or-nothing.
+export const deleteUserCascade = db.transaction((userId) => {
+  db.prepare("DELETE FROM login_log WHERE user_id = ?").run(userId);
+  db.prepare("DELETE FROM score_log WHERE user_id = ?").run(userId);
+  db.prepare("DELETE FROM scores WHERE user_id = ?").run(userId);
+  db.prepare("DELETE FROM users WHERE id = ?").run(userId);
+});
 
 // Cumulative score per (user, game) — points ADD to existing total for that game.
 export function recordScore(userId, gameId, points) {

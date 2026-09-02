@@ -19,6 +19,10 @@ const PORT = process.env.PORT || 4000;
 const ORIGIN = process.env.CORS_ORIGIN || "*";
 
 const app = express();
+// Cloud Run sits behind a load balancer/proxy — without this, req.ip would
+// resolve to the proxy's internal address instead of the real client IP,
+// which the admin panel's login log relies on.
+app.set("trust proxy", true);
 app.use(cors({ origin: ORIGIN }));
 app.use(express.json());
 

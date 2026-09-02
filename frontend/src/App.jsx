@@ -50,9 +50,9 @@ function AuthProvider({ children }) {
     })();
   }, []);
 
-  const signup = async (username, password, displayName) => {
+  const signup = async (username, password, displayName, email) => {
     try {
-      const { token, user } = await api.signup(username, password, displayName);
+      const { token, user } = await api.signup(username, password, displayName, email);
       tokenStore.set(token);
       setUser(user);
       return null;
@@ -100,14 +100,14 @@ function AuthScreen() {
   const { signup, login } = useAuth();
   const { navigate } = useNav();
   const [tab, setTab] = useState("login");
-  const [form, setForm] = useState({ username: "", password: "", displayName: "" });
+  const [form, setForm] = useState({ username: "", password: "", displayName: "", email: "" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const upd = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   const submit = async () => {
     setBusy(true); setError("");
-    const err = tab === "login" ? await login(form.username, form.password) : await signup(form.username, form.password, form.displayName);
+    const err = tab === "login" ? await login(form.username, form.password) : await signup(form.username, form.password, form.displayName, form.email);
     if (err) setError(err);
     else navigate("portal");
     setBusy(false);
@@ -133,6 +133,7 @@ function AuthScreen() {
         <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: 24 }}>
           {tab === "signup" && <input placeholder="Display Name" value={form.displayName} onChange={e => upd("displayName", e.target.value)} style={inputStyle} />}
           <input placeholder="Username" value={form.username} onChange={e => upd("username", e.target.value)} style={inputStyle} />
+          {tab === "signup" && <input placeholder="Email (optional)" type="email" value={form.email} onChange={e => upd("email", e.target.value)} style={inputStyle} />}
           <input placeholder="Password" type="password" value={form.password} onChange={e => upd("password", e.target.value)} style={inputStyle} onKeyDown={e => e.key === "Enter" && submit()} />
           {error && <div style={{ color: C.rose, fontSize: 13, marginBottom: 12, padding: "8px 12px", background: `${C.rose}12`, borderRadius: 8 }}>{error}</div>}
           <button onClick={submit} disabled={busy} style={{ width: "100%", padding: "12px", borderRadius: 10, background: C.violet, color: "#fff", border: "none", fontSize: 15, fontWeight: 700, cursor: "pointer", opacity: busy ? 0.6 : 1, fontFamily: F }}>
@@ -212,8 +213,8 @@ function SiteHeader() {
                 <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>{user.displayName}</div>
                 <div style={{ fontSize: 11, color: C.textD }}>@{user.username}</div>
               </div>
-              {[{ l: "Dashboard", p: "dashboard" }, { l: "Leaderboard", p: "leaderboard" }].map(i => (
-                <button key={i.p} onClick={() => { navigate(i.p); setProfileOpen(false); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", color: C.textM, fontSize: 13, cursor: "pointer", borderRadius: 6, fontFamily: F }}>{i.l}</button>
+              {[{ l: "Dashboard", p: "dashboard" }, { l: "Leaderboard", p: "leaderboard" }, ...(user.role === "admin" ? [{ l: "🛡️ Admin Panel", p: "admin" }] : [])].map(i => (
+                <button key={i.p} onClick={() => { navigate(i.p); setProfileOpen(false); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", color: i.p === "admin" ? C.amber : C.textM, fontSize: 13, cursor: "pointer", borderRadius: 6, fontFamily: F, fontWeight: i.p === "admin" ? 700 : 400 }}>{i.l}</button>
               ))}
               <button onClick={() => { logout(); setProfileOpen(false); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", color: C.rose, fontSize: 13, cursor: "pointer", borderRadius: 6, marginTop: 4, borderTop: `1px solid ${C.border}`, fontFamily: F }}>Sign Out</button>
             </div>)}
@@ -226,7 +227,7 @@ function SiteHeader() {
       </div>
     </div>
     {menuOpen && (<nav style={{ padding: "8px 16px 16px", display: "flex", flexDirection: "column", gap: 4 }}>
-      {[...links, ...(user ? [{ l: "Dashboard", p: "dashboard" }] : [{ l: "Sign In", p: "auth" }])].map(l => (<button key={l.l} onClick={() => { navigate(l.p); setMenuOpen(false); }} style={{ background: C.card, border: `1px solid ${C.border}`, color: l.p === "auth" ? C.violet : l.p === "kidszone" ? C.pink : C.textM, fontSize: 14, padding: "10px 16px", borderRadius: 8, cursor: "pointer", textAlign: "left", fontFamily: F }}>{l.l}</button>))}
+      {[...links, ...(user ? [{ l: "Dashboard", p: "dashboard" }, ...(user.role === "admin" ? [{ l: "🛡️ Admin Panel", p: "admin" }] : [])] : [{ l: "Sign In", p: "auth" }])].map(l => (<button key={l.l} onClick={() => { navigate(l.p); setMenuOpen(false); }} style={{ background: C.card, border: `1px solid ${C.border}`, color: l.p === "admin" ? C.amber : l.p === "auth" ? C.violet : l.p === "kidszone" ? C.pink : C.textM, fontSize: 14, padding: "10px 16px", borderRadius: 8, cursor: "pointer", textAlign: "left", fontFamily: F }}>{l.l}</button>))}
     </nav>)}
     <style>{`@media(max-width:640px){.dnav{display:none!important}.mbtn{display:block!important}}@media(min-width:641px){.mbtn{display:none!important}}`}</style>
   </header>);
@@ -1496,9 +1497,340 @@ function PicturePuzzle() {
 }
 
 // ══════════════════════════════════════
+// GAME: LUDO (Solo vs AI / 2 Players / 4 Players — local pass-and-play)
+// Classic 15×15 cross board, 52-square shared track (13 squares per color,
+// verified via 90°-rotation symmetry about the board center), 8 safe
+// squares (4 start squares + 4 stars), 6-square home column per color.
+// Not online-multiplayer (see README: turn-based board games only), but
+// fully playable solo vs AI or hotseat with friends on one device.
+// ══════════════════════════════════════
+const LUDO_PATH = [
+  [6, 1], [6, 2], [6, 3], [6, 4], [6, 5],
+  [5, 6], [4, 6], [3, 6], [2, 6], [1, 6], [0, 6],
+  [0, 7],
+  [0, 8],
+  [1, 8], [2, 8], [3, 8], [4, 8], [5, 8],
+  [6, 9], [6, 10], [6, 11], [6, 12], [6, 13], [6, 14],
+  [7, 14],
+  [8, 14],
+  [8, 13], [8, 12], [8, 11], [8, 10], [8, 9],
+  [9, 8], [10, 8], [11, 8], [12, 8], [13, 8], [14, 8],
+  [14, 7],
+  [14, 6],
+  [13, 6], [12, 6], [11, 6], [10, 6], [9, 6],
+  [8, 5], [8, 4], [8, 3], [8, 2], [8, 1], [8, 0],
+  [7, 0],
+  [6, 0],
+];
+const LUDO_ORDER = ["red", "green", "yellow", "blue"];
+const LUDO_COLORS = {
+  red: { start: 0, hex: "#ef4444", home: [[7, 1], [7, 2], [7, 3], [7, 4], [7, 5], [7, 6]] },
+  green: { start: 13, hex: "#22c55e", home: [[1, 7], [2, 7], [3, 7], [4, 7], [5, 7], [6, 7]] },
+  yellow: { start: 26, hex: "#eab308", home: [[7, 13], [7, 12], [7, 11], [7, 10], [7, 9], [7, 8]] },
+  blue: { start: 39, hex: "#3b82f6", home: [[13, 7], [12, 7], [11, 7], [10, 7], [9, 7], [8, 7]] },
+};
+const LUDO_SAFE = new Set([0, 13, 26, 39, 8, 21, 34, 47]);
+const LUDO_YARD_GRID = {
+  red: { row: "1 / 7", col: "1 / 7" },
+  green: { row: "1 / 7", col: "10 / 16" },
+  yellow: { row: "10 / 16", col: "10 / 16" },
+  blue: { row: "10 / 16", col: "1 / 7" },
+};
+const LUDO_YARD_SLOTS = [[0, 0], [0, 1], [1, 0], [1, 1]];
+const LUDO_STACK_OFFSETS = {
+  2: [{ x: -22, y: -22 }, { x: 22, y: 22 }],
+  3: [{ x: -24, y: -24 }, { x: 24, y: -24 }, { x: 0, y: 24 }],
+  4: [{ x: -24, y: -24 }, { x: 24, y: -24 }, { x: -24, y: 24 }, { x: 24, y: 24 }],
+};
+
+function ludoTokenCell(color, steps) {
+  if (steps <= 0) return null;
+  if (steps <= 51) return LUDO_PATH[(LUDO_COLORS[color].start + steps - 1) % 52];
+  if (steps <= 57) return LUDO_COLORS[color].home[steps - 52];
+  return null;
+}
+function ludoCanMove(steps, dice) {
+  if (steps === 0) return dice === 6;
+  if (steps >= 57) return false;
+  return steps + dice <= 57;
+}
+function buildLudoPlayers(mode) {
+  if (mode === "2 Players") {
+    return [
+      { color: "red", name: "Player 1 (Red)", isAI: false },
+      { color: "yellow", name: "Player 2 (Yellow)", isAI: false },
+    ];
+  }
+  if (mode === "4 Players") {
+    return [
+      { color: "red", name: "Player 1 (Red)", isAI: false },
+      { color: "green", name: "Player 2 (Green)", isAI: false },
+      { color: "yellow", name: "Player 3 (Yellow)", isAI: false },
+      { color: "blue", name: "Player 4 (Blue)", isAI: false },
+    ];
+  }
+  return [
+    { color: "red", name: "You", isAI: false },
+    { color: "green", name: "Green AI", isAI: true },
+    { color: "yellow", name: "Yellow AI", isAI: true },
+    { color: "blue", name: "Blue AI", isAI: true },
+  ];
+}
+function initLudoTokens(players) {
+  const t = {};
+  players.forEach(p => { t[p.color] = [0, 0, 0, 0]; });
+  return t;
+}
+// Grammar helpers so the solo player's name ("You") reads naturally
+// ("Your turn", "You win!") instead of "You's turn" / "You wins".
+const ludoPoss = (name) => (name === "You" ? "Your" : `${name}'s`);
+const ludoWin = (name) => (name === "You" ? "You win the game!" : `${name} wins the game!`);
+// Greedy AI: prefer capturing > finishing a token > leaving the yard > the most-advanced token.
+function pickLudoAiMove(color, moves, tokens, dice) {
+  let capture = null, finish = null, exit = null, best = moves[0], bestSteps = -1;
+  for (const idx of moves) {
+    const s = tokens[color][idx];
+    const ns = s === 0 ? 1 : s + dice;
+    if (ns <= 51) {
+      const gi = (LUDO_COLORS[color].start + ns - 1) % 52;
+      if (!LUDO_SAFE.has(gi)) {
+        for (const oc of Object.keys(tokens)) {
+          if (oc === color) continue;
+          if (tokens[oc].some(os => os >= 1 && os <= 51 && (LUDO_COLORS[oc].start + os - 1) % 52 === gi)) capture = idx;
+        }
+      }
+    }
+    if (ns === 57) finish = idx;
+    if (s === 0 && exit === null) exit = idx;
+    if (s > bestSteps) { bestSteps = s; best = idx; }
+  }
+  return capture ?? finish ?? exit ?? best;
+}
+
+function LudoBoard({ tokens, activeColors, current, movable, onTokenClick }) {
+  const renderTokens = [];
+  activeColors.forEach(color => {
+    (tokens[color] || []).forEach((steps, i) => {
+      if (steps <= 0) return;
+      const cell = ludoTokenCell(color, steps);
+      if (!cell) return;
+      renderTokens.push({ color, i, steps, r: cell[0], c: cell[1] });
+    });
+  });
+  const groups = {};
+  renderTokens.forEach(t => { const k = `${t.r},${t.c}`; (groups[k] = groups[k] || []).push(t); });
+
+  return (
+    <div style={{ position: "relative", width: "100%", maxWidth: 520, margin: "0 auto", aspectRatio: "1", display: "grid", gridTemplateColumns: "repeat(15,1fr)", gridTemplateRows: "repeat(15,1fr)", background: "#0d0d1a", border: `3px solid ${C.border}`, borderRadius: 16, overflow: "hidden", boxShadow: "0 20px 50px -20px rgba(0,0,0,0.6)" }}>
+      {LUDO_ORDER.map(color => {
+        const active = activeColors.includes(color);
+        const g = LUDO_YARD_GRID[color];
+        return (
+          <div key={`yard-${color}`} style={{ gridRow: g.row, gridColumn: g.col, background: active ? `${LUDO_COLORS[color].hex}18` : "rgba(255,255,255,0.02)", border: `2px solid ${active ? LUDO_COLORS[color].hex + "55" : "transparent"}`, margin: 3, borderRadius: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: "10%", padding: "14%" }}>
+            {active && LUDO_YARD_SLOTS.map(([row, col], i) => {
+              const inYard = (tokens[color]?.[i] ?? 0) === 0;
+              const clickable = current === color && movable.includes(i) && inYard;
+              if (!inYard) return <div key={i} />;
+              return (
+                <button key={i} onClick={() => clickable && onTokenClick(i)} disabled={!clickable} aria-label={`${color} token ${i + 1} in yard`}
+                  style={{ gridRow: row + 1, gridColumn: col + 1, borderRadius: "50%", background: LUDO_COLORS[color].hex, border: clickable ? "3px solid #fff" : "2px solid rgba(0,0,0,0.25)", boxShadow: clickable ? `0 0 0 4px ${LUDO_COLORS[color].hex}55, 0 4px 10px rgba(0,0,0,0.4)` : "0 2px 6px rgba(0,0,0,0.35)", cursor: clickable ? "pointer" : "default", padding: 0 }} />
+              );
+            })}
+          </div>
+        );
+      })}
+
+      <div style={{ gridRow: "7 / 10", gridColumn: "7 / 10", background: `conic-gradient(from 45deg, ${LUDO_COLORS.red.hex} 0deg 90deg, ${LUDO_COLORS.green.hex} 90deg 180deg, ${LUDO_COLORS.yellow.hex} 180deg 270deg, ${LUDO_COLORS.blue.hex} 270deg 360deg)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, border: "2px solid rgba(255,255,255,0.25)" }}>🏠</div>
+
+      {LUDO_PATH.map(([r, c], i) => {
+        const starterIdx = [0, 13, 26, 39].indexOf(i);
+        const isStar = [8, 21, 34, 47].includes(i);
+        const owner = starterIdx >= 0 ? LUDO_ORDER[starterIdx] : null;
+        return (
+          <div key={`p${i}`} style={{ gridRow: r + 1, gridColumn: c + 1, background: owner ? `${LUDO_COLORS[owner].hex}40` : "#161626", border: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "rgba(255,255,255,0.4)" }}>
+            {isStar ? "★" : ""}
+          </div>
+        );
+      })}
+
+      {LUDO_ORDER.map(color => LUDO_COLORS[color].home.map(([r, c], i) => (
+        <div key={`${color}-home-${i}`} style={{ gridRow: r + 1, gridColumn: c + 1, background: `${LUDO_COLORS[color].hex}55` }} />
+      )))}
+
+      {renderTokens.map(t => {
+        const group = groups[`${t.r},${t.c}`];
+        const gi = group.indexOf(t);
+        const off = group.length > 1 ? (LUDO_STACK_OFFSETS[group.length]?.[gi] || { x: 0, y: 0 }) : { x: 0, y: 0 };
+        const clickable = current === t.color && movable.includes(t.i) && t.steps > 0 && t.steps < 57;
+        return (
+          <button key={`${t.color}-${t.i}`} onClick={() => clickable && onTokenClick(t.i)} disabled={!clickable} aria-label={`${t.color} token ${t.i + 1}`}
+            style={{ gridRow: t.r + 1, gridColumn: t.c + 1, width: "62%", height: "62%", alignSelf: "center", justifySelf: "center", borderRadius: "50%", background: LUDO_COLORS[t.color].hex, border: clickable ? "3px solid #fff" : t.steps === 57 ? "2px solid rgba(255,255,255,0.6)" : "2px solid rgba(0,0,0,0.3)", boxShadow: clickable ? `0 0 0 4px ${LUDO_COLORS[t.color].hex}66, 0 4px 10px rgba(0,0,0,0.4)` : "0 2px 6px rgba(0,0,0,0.35)", cursor: clickable ? "pointer" : "default", zIndex: 5, transform: `translate(${off.x}%, ${off.y}%)`, transition: "all .25s ease", padding: 0 }} />
+        );
+      })}
+    </div>
+  );
+}
+
+function Ludo() {
+  const ac = C.emerald;
+  const { recordScore } = useAuth();
+  const [mode, setMode] = useState("Solo vs AI");
+  const [players, setPlayers] = useState(() => buildLudoPlayers("Solo vs AI"));
+  const [tokens, setTokens] = useState(() => initLudoTokens(players));
+  const [turnIdx, setTurnIdx] = useState(0);
+  const [dice, setDice] = useState(null);
+  const [phase, setPhase] = useState("idle"); // idle -> rolled -> idle
+  const [movable, setMovable] = useState([]);
+  const [consecutiveSixes, setConsecutiveSixes] = useState(0);
+  const [msg, setMsg] = useState("Roll the dice to begin!");
+  const [winner, setWinner] = useState(null);
+  const scoredRef = useRef(false);
+
+  const newGame = useCallback((m) => {
+    const ps = buildLudoPlayers(m);
+    setPlayers(ps);
+    setTokens(initLudoTokens(ps));
+    setTurnIdx(0);
+    setDice(null);
+    setPhase("idle");
+    setMovable([]);
+    setConsecutiveSixes(0);
+    setWinner(null);
+    scoredRef.current = false;
+    setMsg(`${ludoPoss(ps[0].name)} turn — roll the dice`);
+  }, []);
+
+  useEffect(() => { newGame(mode); }, [mode, newGame]);
+
+  const current = players[turnIdx];
+
+  const rollDice = useCallback(() => {
+    if (!current || phase !== "idle" || winner) return;
+    const d = 1 + Math.floor(Math.random() * 6);
+    const steps = tokens[current.color] || [0, 0, 0, 0];
+    const moves = steps.map((s, i) => (ludoCanMove(s, d) ? i : -1)).filter(i => i >= 0);
+
+    if (d === 6) {
+      const nc = consecutiveSixes + 1;
+      if (nc >= 3) {
+        setDice(d);
+        setConsecutiveSixes(0);
+        setMsg(`${current.name} rolled three 6s in a row — turn forfeited!`);
+        setTimeout(() => { setTurnIdx(p => (p + 1) % players.length); setDice(null); }, 900);
+        return;
+      }
+      setConsecutiveSixes(nc);
+    } else {
+      setConsecutiveSixes(0);
+    }
+
+    setDice(d);
+    if (moves.length === 0) {
+      setMsg(`${current.name} rolled ${d} — no valid moves`);
+      setTimeout(() => { setTurnIdx(p => (p + 1) % players.length); setDice(null); }, 900);
+      return;
+    }
+    setMovable(moves);
+    setPhase("rolled");
+    setMsg(`${current.name} rolled ${d} — ${current.isAI ? "thinking..." : "choose a token to move"}`);
+  }, [current, phase, winner, tokens, consecutiveSixes, players.length]);
+
+  const moveToken = useCallback((idx) => {
+    if (!current || phase !== "rolled" || !movable.includes(idx) || winner) return;
+    const color = current.color;
+    const curSteps = tokens[color][idx];
+    const newSteps = curSteps === 0 ? 1 : curSteps + dice;
+    let captured = false;
+    const newTokens = { ...tokens, [color]: tokens[color].map((s, i) => (i === idx ? newSteps : s)) };
+
+    if (newSteps >= 1 && newSteps <= 51) {
+      const globalIdx = (LUDO_COLORS[color].start + newSteps - 1) % 52;
+      if (!LUDO_SAFE.has(globalIdx)) {
+        for (const oc of Object.keys(newTokens)) {
+          if (oc === color) continue;
+          newTokens[oc] = newTokens[oc].map(s => {
+            if (s >= 1 && s <= 51 && (LUDO_COLORS[oc].start + s - 1) % 52 === globalIdx) { captured = true; return 0; }
+            return s;
+          });
+        }
+      }
+    }
+
+    setTokens(newTokens);
+    const finished = newSteps === 57;
+    const won = newTokens[color].every(s => s === 57);
+    setMovable([]);
+    setDice(null);
+    setPhase("idle");
+
+    if (won) {
+      setWinner(color);
+      setMsg(`🎉 ${ludoWin(current.name)}`);
+      if (!current.isAI && !scoredRef.current) { scoredRef.current = true; recordScore("ludo", 40); }
+      return;
+    }
+
+    const bonus = dice === 6 || captured || finished;
+    if (bonus) {
+      setMsg(captured ? `${current.name} captured a token — rolls again!` : finished ? `${current.name} got a token home — rolls again!` : `${current.name} rolled a 6 — rolls again!`);
+    } else {
+      setTimeout(() => setTurnIdx(p => (p + 1) % players.length), 350);
+    }
+  }, [current, phase, movable, winner, tokens, dice, players.length, recordScore]);
+
+  useEffect(() => {
+    if (!current || winner) return;
+    setMsg(`${ludoPoss(current.name)} turn — roll the dice`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turnIdx]);
+
+  useEffect(() => {
+    if (!current || winner || !current.isAI || phase !== "idle") return;
+    const t = setTimeout(() => rollDice(), 700);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turnIdx, phase, winner]);
+
+  useEffect(() => {
+    if (!current || winner || !current.isAI || phase !== "rolled" || movable.length === 0) return;
+    const t = setTimeout(() => { moveToken(pickLudoAiMove(current.color, movable, tokens, dice)); }, 700);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turnIdx, phase, movable, winner]);
+
+  return (<GS id="ludo" title="Ludo" accent={ac} guide={<><p>Race all four of your tokens around the board and into home before your opponents. Roll a 6 to bring a token out of your yard, then move tokens clockwise around the shared track.</p><p>Land on an opponent's token on an unsafe square to send it straight back to their yard — squares marked with a star, plus every color's starting square, are safe from capture. Roll a 6, capture a token, or get a token all the way home to earn another turn. You need the exact roll to bring a token into the center.</p></>}>
+    <MS modes={["Solo vs AI", "2 Players", "4 Players"]} sel={mode} onSel={setMode} ac={ac} />
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center", marginBottom: 14 }}>
+      {players.map((p, i) => (
+        <div key={p.color} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 20, background: i === turnIdx && !winner ? `${LUDO_COLORS[p.color].hex}25` : C.card, border: `1px solid ${i === turnIdx && !winner ? LUDO_COLORS[p.color].hex : C.border}`, fontSize: 12, fontWeight: 700, color: i === turnIdx && !winner ? LUDO_COLORS[p.color].hex : C.textM }}>
+          <span style={{ width: 10, height: 10, borderRadius: "50%", background: LUDO_COLORS[p.color].hex, display: "inline-block" }} />
+          {p.name}
+          {tokens[p.color]?.filter(s => s === 57).length > 0 && <span> · {tokens[p.color].filter(s => s === 57).length}/4 🏠</span>}
+        </div>
+      ))}
+    </div>
+    <SB msg={msg} ac={ac} />
+    <LudoBoard tokens={tokens} activeColors={players.map(p => p.color)} current={current?.color} movable={phase === "rolled" && current && !current.isAI ? movable : []} onTokenClick={moveToken} />
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, marginTop: 18 }}>
+      <div style={{ width: 56, height: 56, borderRadius: 14, background: "#fff", color: "#111", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, fontWeight: 900, boxShadow: "0 6px 18px rgba(0,0,0,0.35)" }}>
+        {dice || "?"}
+      </div>
+      {!winner && current && !current.isAI && (
+        <button onClick={rollDice} disabled={phase !== "idle"} style={{ padding: "10px 28px", borderRadius: 10, background: ac, color: "#fff", border: "none", fontSize: 14, fontWeight: 700, cursor: phase === "idle" ? "pointer" : "default", opacity: phase === "idle" ? 1 : 0.55, fontFamily: F }}>
+          🎲 Roll Dice
+        </button>
+      )}
+      {!winner && current?.isAI && <div style={{ fontSize: 12, color: C.textD }}>AI is playing...</div>}
+    </div>
+    {winner && <RB onClick={() => newGame(mode)} ac={ac} label="New Game" />}
+  </GS>);
+}
+
+// ══════════════════════════════════════
 // GAME DATA
 // ══════════════════════════════════════
 const GAMES = [
+  { id:"ludo",name:"Ludo",emoji:"🎲",cat:"Strategy",players:"2-4",desc:"Roll the dice, race your tokens home — the ultimate family classic",longDesc:"Ludo traces back to the ancient Indian game Pachisi, played by royalty over 1,500 years ago. Our version features a big classic board, capturing, safe squares, and bonus turns on 6s — play solo against 3 AI opponents or pass-and-play locally with 2-4 players." },
   { id:"chess",name:"Chess",emoji:"♟️",cat:"Strategy",players:"1-2",desc:"The ultimate strategy game — checkmate your opponent",longDesc:"Chess originated in India around the 6th century and has evolved into the world's most popular strategy game. Our browser version includes check/checkmate detection, pawn promotion, legal move highlighting, and real-time online play against another registered player." },
   { id:"tictactoe",name:"Tic Tac Toe",emoji:"❌",cat:"Strategy",players:"1-2",desc:"Classic X/O with unbeatable AI or online play",longDesc:"One of the oldest known strategy games, dating back to ancient Egypt around 1300 BCE. Our AI uses the minimax algorithm, making it mathematically unbeatable — or challenge another player online." },
   { id:"connect4",name:"Connect Four",emoji:"🔴",cat:"Strategy",players:"1-2",desc:"Drop discs, connect four in a row",longDesc:"First sold by Milton Bradley in 1974. Connect Four is a solved game — the first player can always win with perfect play. Play vs AI, a friend locally, or online." },
@@ -1522,7 +1854,7 @@ const GAMES = [
   { id:"size",name:"Size Compare",emoji:"📏",cat:"Kids",players:"1",desc:"Which is bigger? Which is smaller? Test your eyes!",longDesc:"Two items appear at different sizes and children tap the bigger or smaller one. Alternating questions keep kids thinking about spatial relationships and comparison skills.", age:"3-7" },
   { id:"puzzle",name:"Picture Puzzle",emoji:"🧩",cat:"Kids",players:"1",desc:"Slide tiles into the right order — solve the puzzle!",longDesc:"A classic 3x3 sliding puzzle adapted for young children with fun emoji themes (animals, ocean, space). Develops problem-solving skills, sequential thinking, and patience.", age:"5-10" },
 ];
-const gameMap = { chess:Chess,tictactoe:TicTacToe,connect4:ConnectFour,checkers:Checkers,dotsboxes:DotsBoxes,carrom:Carrom,pool:Pool,snooker:Snooker,memory:MemoryMatch,minesweeper:Minesweeper,"2048":Game2048,hangman:Hangman,snake:SnakeGame,whack:WhackAMole,abc:ABCExplorer,numbers:NumberFun,colors:ColorMatch,shapes:ShapeSorter,animals:AnimalQuiz,size:SizeCompare,puzzle:PicturePuzzle };
+const gameMap = { ludo:Ludo,chess:Chess,tictactoe:TicTacToe,connect4:ConnectFour,checkers:Checkers,dotsboxes:DotsBoxes,carrom:Carrom,pool:Pool,snooker:Snooker,memory:MemoryMatch,minesweeper:Minesweeper,"2048":Game2048,hangman:Hangman,snake:SnakeGame,whack:WhackAMole,abc:ABCExplorer,numbers:NumberFun,colors:ColorMatch,shapes:ShapeSorter,animals:AnimalQuiz,size:SizeCompare,puzzle:PicturePuzzle };
 
 // ══════════════════════════════════════
 // KIDS ZONE PAGE
@@ -1637,6 +1969,203 @@ function Leaderboard() {
       </div>
     )}
     <AdSlot format="rectangle" style={{ marginTop: 24 }} />
+  </main>);
+}
+
+// ══════════════════════════════════════
+// ADMIN PANEL — visible only to accounts with role "admin" (granted via the
+// ADMIN_USERNAME env var self-promotion in backend/src/db.js). Lets the site
+// owner see every registered user, their (optional) email and login
+// history, and disable or permanently delete accounts.
+// ══════════════════════════════════════
+function fmtDate(ts) {
+  if (!ts) return "—";
+  try { return new Date(ts).toLocaleString(); } catch { return "—"; }
+}
+
+function AdminPanel() {
+  const { user } = useAuth();
+  const { navigate } = useNav();
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [busyId, setBusyId] = useState(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [loginHistory, setLoginHistory] = useState(null); // { userId, entries }
+  const [search, setSearch] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true); setErr("");
+    try {
+      const { users } = await api.adminUsers();
+      setUsers(users);
+    } catch (e) {
+      setErr(e.message || "Failed to load users");
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { if (user?.role === "admin") load(); }, [user, load]);
+
+  if (!user) {
+    return (
+      <main style={{ maxWidth: 500, margin: "0 auto", padding: "60px 16px", fontFamily: F, textAlign: "center" }}>
+        <div style={{ fontSize: 48, marginBottom: 12 }}>🛡️</div>
+        <h1 style={{ fontSize: 24, fontWeight: 800, color: C.text, marginBottom: 8 }}>Sign in required</h1>
+        <button onClick={() => navigate("auth")} style={{ padding: "12px 32px", borderRadius: 10, background: C.violet, border: "none", color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: F }}>Sign In</button>
+      </main>
+    );
+  }
+  if (user.role !== "admin") {
+    return (
+      <main style={{ maxWidth: 500, margin: "0 auto", padding: "60px 16px", fontFamily: F, textAlign: "center" }}>
+        <div style={{ fontSize: 48, marginBottom: 12 }}>🚫</div>
+        <h1 style={{ fontSize: 22, fontWeight: 800, color: C.text, marginBottom: 8 }}>Admin access required</h1>
+        <p style={{ color: C.textM, fontSize: 14 }}>Your account doesn't have admin permissions.</p>
+      </main>
+    );
+  }
+
+  const doDisable = async (u) => {
+    setBusyId(u.id);
+    try {
+      await (u.disabled ? api.adminEnableUser(u.id) : api.adminDisableUser(u.id));
+      setUsers(prev => prev.map(x => x.id === u.id ? { ...x, disabled: !u.disabled } : x));
+    } catch (e) { setErr(e.message); }
+    setBusyId(null);
+  };
+
+  const doDelete = async (u) => {
+    setBusyId(u.id);
+    try {
+      await api.adminDeleteUser(u.id);
+      setUsers(prev => prev.filter(x => x.id !== u.id));
+      setConfirmDeleteId(null);
+    } catch (e) { setErr(e.message); }
+    setBusyId(null);
+  };
+
+  const viewLogins = async (u) => {
+    setLoginHistory({ userId: u.id, username: u.username, entries: null });
+    try {
+      const { logins } = await api.adminUserLogins(u.id);
+      setLoginHistory({ userId: u.id, username: u.username, entries: logins });
+    } catch (e) {
+      setLoginHistory({ userId: u.id, username: u.username, entries: [], error: e.message });
+    }
+  };
+
+  const filtered = users.filter(u => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return u.username.toLowerCase().includes(q) || u.displayName?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q);
+  });
+
+  const btnStyle = (bg, color = "#fff") => ({ padding: "6px 12px", borderRadius: 7, background: bg, color, border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: F, whiteSpace: "nowrap" });
+
+  return (<main style={{ maxWidth: 1100, margin: "0 auto", padding: "0 16px 48px", fontFamily: F }}>
+    <Breadcrumbs items={[{ label: "Home", page: "portal" }, { label: "Admin Panel" }]} />
+    <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "8px 0 6px", flexWrap: "wrap", justifyContent: "space-between" }}>
+      <h1 style={{ fontSize: 26, fontWeight: 800, color: C.text, margin: 0 }}>🛡️ Admin Panel</h1>
+      <span style={{ fontSize: 12, color: C.textD }}>Signed in as <strong style={{ color: C.amber }}>{user.displayName}</strong></span>
+    </div>
+    <p style={{ color: C.textM, fontSize: 13, marginBottom: 20 }}>Manage every registered player: view login activity, disable an account (blocks sign-in and online play immediately), or permanently delete an account and all of its data.</p>
+
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 10, marginBottom: 20 }}>
+      {[
+        { l: "Total Users", v: users.length, c: C.violet },
+        { l: "Admins", v: users.filter(u => u.role === "admin").length, c: C.amber },
+        { l: "Disabled", v: users.filter(u => u.disabled).length, c: C.rose },
+        { l: "With Email", v: users.filter(u => u.email).length, c: C.cyan },
+      ].map(s => (
+        <div key={s.l} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 12, textAlign: "center" }}>
+          <div style={{ fontSize: 10, color: C.textD, textTransform: "uppercase", letterSpacing: 1 }}>{s.l}</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: s.c }}>{s.v}</div>
+        </div>
+      ))}
+    </div>
+
+    <input placeholder="Search by username, display name, or email..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: "100%", boxSizing: "border-box", padding: "10px 14px", borderRadius: 10, border: `1px solid ${C.border}`, background: "rgba(0,0,0,0.4)", color: C.text, fontSize: 13, marginBottom: 16, outline: "none", fontFamily: F }} />
+
+    {err && <div style={{ color: C.rose, fontSize: 13, marginBottom: 12, padding: "10px 14px", background: `${C.rose}12`, borderRadius: 8 }}>{err}</div>}
+
+    {loading ? <p style={{ color: C.textM }}>Loading users...</p> : filtered.length === 0 ? <p style={{ color: C.textM }}>No matching users.</p> : (
+      <div style={{ overflowX: "auto", border: `1px solid ${C.border}`, borderRadius: 12 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead>
+            <tr style={{ background: "rgba(255,255,255,0.03)", textAlign: "left" }}>
+              {["User", "Email", "Role", "Status", "Joined", "Last Login", "Logins", "Score", "Actions"].map(h => (
+                <th key={h} style={{ padding: "10px 12px", color: C.textD, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5, borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(u => (
+              <tr key={u.id} style={{ borderBottom: `1px solid ${C.border}`, opacity: u.disabled ? 0.55 : 1 }}>
+                <td style={{ padding: "10px 12px" }}>
+                  <div style={{ fontWeight: 600, color: C.text }}>{u.displayName}</div>
+                  <div style={{ fontSize: 11, color: C.textD }}>@{u.username}</div>
+                </td>
+                <td style={{ padding: "10px 12px", color: C.textM, fontSize: 12 }}>{u.email || <span style={{ color: C.textD }}>—</span>}</td>
+                <td style={{ padding: "10px 12px" }}>
+                  {u.role === "admin" ? <span style={{ fontSize: 11, fontWeight: 700, color: C.amber, background: `${C.amber}15`, padding: "3px 9px", borderRadius: 10 }}>Admin</span> : <span style={{ fontSize: 11, color: C.textD }}>User</span>}
+                </td>
+                <td style={{ padding: "10px 12px" }}>
+                  {u.disabled ? <span style={{ fontSize: 11, fontWeight: 700, color: C.rose, background: `${C.rose}15`, padding: "3px 9px", borderRadius: 10 }}>Disabled</span> : <span style={{ fontSize: 11, fontWeight: 700, color: C.emerald, background: `${C.emerald}15`, padding: "3px 9px", borderRadius: 10 }}>Active</span>}
+                </td>
+                <td style={{ padding: "10px 12px", color: C.textD, fontSize: 12, whiteSpace: "nowrap" }}>{fmtDate(u.createdAt)}</td>
+                <td style={{ padding: "10px 12px", color: C.textD, fontSize: 12, whiteSpace: "nowrap" }}>{fmtDate(u.lastLoginAt)}</td>
+                <td style={{ padding: "10px 12px", color: C.textM, fontSize: 12, textAlign: "center" }}>
+                  <button onClick={() => viewLogins(u)} style={{ background: "none", border: "none", color: C.cyan, fontSize: 12, cursor: "pointer", fontFamily: F, textDecoration: "underline" }}>{u.loginCount ?? 0}</button>
+                </td>
+                <td style={{ padding: "10px 12px", color: C.amber, fontWeight: 700, fontSize: 13 }}>{u.totalScore}</td>
+                <td style={{ padding: "10px 12px" }}>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {u.id === user.id ? (
+                      <span style={{ fontSize: 11, color: C.textD }}>(you)</span>
+                    ) : (<>
+                      <button disabled={busyId === u.id} onClick={() => doDisable(u)} style={btnStyle(u.disabled ? C.emerald : C.card, u.disabled ? "#fff" : C.textM)}>
+                        {u.disabled ? "Enable" : "Disable"}
+                      </button>
+                      {confirmDeleteId === u.id ? (
+                        <>
+                          <button disabled={busyId === u.id} onClick={() => doDelete(u)} style={btnStyle(C.rose)}>Confirm Delete</button>
+                          <button onClick={() => setConfirmDeleteId(null)} style={btnStyle(C.card, C.textM)}>Cancel</button>
+                        </>
+                      ) : (
+                        <button onClick={() => setConfirmDeleteId(u.id)} style={btnStyle("transparent", C.rose)}>Delete</button>
+                      )}
+                    </>)}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+
+    {loginHistory && (
+      <div role="dialog" aria-label="Login history" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999, padding: 16 }} onClick={() => setLoginHistory(null)}>
+        <div onClick={e => e.stopPropagation()} style={{ background: "#12121f", border: `1px solid ${C.border}`, borderRadius: 14, padding: 20, maxWidth: 480, width: "100%", maxHeight: "70vh", overflowY: "auto" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <h3 style={{ margin: 0, fontSize: 16, color: C.text }}>Login history — @{loginHistory.username}</h3>
+            <button onClick={() => setLoginHistory(null)} style={{ background: "none", border: "none", color: C.textM, fontSize: 18, cursor: "pointer" }}>✕</button>
+          </div>
+          {loginHistory.entries === null ? <p style={{ color: C.textM, fontSize: 13 }}>Loading...</p> :
+           loginHistory.entries.length === 0 ? <p style={{ color: C.textM, fontSize: 13 }}>No login records yet.</p> : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {loginHistory.entries.map((l, i) => (
+                <div key={i} style={{ padding: "8px 10px", background: C.card, borderRadius: 8, fontSize: 12 }}>
+                  <div style={{ color: C.text }}>{fmtDate(l.created_at)}</div>
+                  <div style={{ color: C.textD }}>{l.ip || "unknown IP"} · {l.user_agent ? l.user_agent.slice(0, 60) : "unknown device"}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    )}
   </main>);
 }
 
@@ -1790,7 +2319,7 @@ function Portal() {
     </div>
     <section style={{ maxWidth: 800, margin: "36px auto 0", padding: "0 16px", fontFamily: F }}>
       <h2 style={{ fontSize: 20, fontWeight: 700, color: C.text, marginBottom: 10 }}>Play Free Games Online at {SITE.domain}</h2>
-      <p style={{ fontSize: 14, color: C.textM, lineHeight: 1.75, marginBottom: 14 }}>Welcome to {SITE.name} — your destination for free classic games and educational kids' games at {SITE.domain}. From the strategic depth of Chess and Checkers to the physics-based fun of Carrom, 8-Ball Pool, and Snooker, from brain-teasing puzzles like Minesweeper and 2048 to fast-paced action games like Snake and Whack-a-Mole, we have something for every player.</p>
+      <p style={{ fontSize: 14, color: C.textM, lineHeight: 1.75, marginBottom: 14 }}>Welcome to {SITE.name} — your destination for free classic games and educational kids' games at {SITE.domain}. Roll the dice in Ludo, the family favorite for 2-4 players, test your strategy in Chess and Checkers, enjoy the physics-based fun of Carrom, 8-Ball Pool, and Snooker, solve brain-teasing puzzles like Minesweeper and 2048, or dive into fast-paced action games like Snake and Whack-a-Mole — we have something for every player.</p>
       <p style={{ fontSize: 14, color: C.textM, lineHeight: 1.75, marginBottom: 14 }}>Sign in to challenge another registered player in real time — Tic Tac Toe, Connect Four, Chess, Checkers, and Dots & Boxes all support Online mode with Quick Match or private room codes you can share with a friend.</p>
       <p style={{ fontSize: 14, color: C.textM, lineHeight: 1.75, marginBottom: 14 }}>Our Kids Zone features 7 educational games designed for children ages 2-10, covering letters, numbers, colors, shapes, animals, sizes, and puzzles — all completely free and safe for young learners.</p>
       <p style={{ fontSize: 14, color: C.textM, lineHeight: 1.75, marginBottom: 14 }}>Create a free account on {SITE.domain} to track your scores across all {GAMES.length} games, compete on the global leaderboard, and participate in weekly and monthly tournaments. Every game works on desktops, tablets, and smartphones with no downloads required.</p>
@@ -1807,7 +2336,7 @@ function Portal() {
 const PAGE_TO_PATH = {
   portal: "/", auth: "/signin", kidszone: "/kids", leaderboard: "/leaderboard",
   events: "/events", about: "/about", contact: "/contact", privacy: "/privacy",
-  terms: "/terms", disclaimer: "/disclaimer", dashboard: "/dashboard",
+  terms: "/terms", disclaimer: "/disclaimer", dashboard: "/dashboard", admin: "/admin",
 };
 function pageKeyToPath(pageKey) {
   if (pageKey.startsWith("game:")) return `/games/${pageKey.slice(5)}`;
@@ -1871,6 +2400,7 @@ function AppShell() {
         <Route path="/terms" element={<TermsPage />} />
         <Route path="/disclaimer" element={<DisclaimerPage />} />
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/admin" element={<AdminPanel />} />
         <Route path="*" element={<Portal />} />
       </Routes>
       <SiteFooter />

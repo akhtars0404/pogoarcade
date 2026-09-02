@@ -37,6 +37,7 @@ export function attachMultiplayer(io) {
     if (!payload) return next(new Error("Authentication required — please sign in to play online."));
     const user = getUserById(payload.sub);
     if (!user) return next(new Error("Account not found"));
+    if (user.disabled) return next(new Error("This account has been disabled"));
     socket.data.user = {
       id: user.id,
       username: user.username,

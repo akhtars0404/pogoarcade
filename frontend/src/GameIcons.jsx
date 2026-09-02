@@ -198,6 +198,18 @@ const GLYPHS = {
       <path d="M28 28 H50 Q54 28 54 33 Q54 38 59 38 Q64 38 64 33 V28 H72 V50 H67 Q62 50 62 55 Q62 60 67 60 H72 V72 H28 V60 Q33 60 33 55 Q33 50 28 50 Z" fillOpacity="0.92" />
     </g>
   ),
+  ludo: (
+    <g>
+      <rect x="22" y="22" width="24" height="24" rx="4" fill="#ef4444" />
+      <rect x="54" y="22" width="24" height="24" rx="4" fill="#22c55e" />
+      <rect x="22" y="54" width="24" height="24" rx="4" fill="#3b82f6" />
+      <rect x="54" y="54" width="24" height="24" rx="4" fill="#eab308" />
+      <circle cx="50" cy="50" r="15" fill="#fff" stroke="#0000001a" strokeWidth="2" />
+      {[[43, 43], [57, 43], [43, 57], [57, 57], [50, 50]].map(([x, y], i) => (
+        <circle key={i} cx={x} cy={y} r="3.2" fill="#111827" />
+      ))}
+    </g>
+  ),
 };
 
 export function GameIcon({ id, cat, size = 64, rounded = 24 }) {

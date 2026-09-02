@@ -5,7 +5,7 @@ steps:
     args:
       - 'build'
       - '-t'
-      - 'us-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:$COMMIT_SHA'
+      - 'us-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:$BUILD_ID'
       - '-t'
       - 'us-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:latest'
       - '.'
@@ -35,7 +35,7 @@ steps:
       - 'deploy'
       - 'pogo-arcade'
       - '--image'
-      - 'us-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:$COMMIT_SHA'
+      - 'us-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:$BUILD_ID'
       - '--region'
       - 'us-central1'
       - '--platform'
@@ -55,7 +55,7 @@ steps:
       - 'JWT_SECRET=pogo-jwt-secret:latest'
 
 images:
-  - 'us-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:$COMMIT_SHA'
+  - 'us-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:$BUILD_ID'
   - 'us-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:latest'
 
 options:

@@ -1,4 +1,22 @@
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; padding: 0; min-height: 100%; }
-body { background: #07070f; }
+body { background: #07070f; overflow-x: hidden; }
 button { font: inherit; }
+
+/* Big 3D game cards on the portal — tap/press feedback for touch devices
+   (the hover glow is handled inline via JS since it needs the per-card
+   category color, but :active works everywhere including mobile taps). */
+.game-card-3d { -webkit-tap-highlight-color: transparent; }
+.game-card-3d:active { transform: translateY(-2px) scale(0.98) !important; }
+
+/* Full-screen game stage: fill the entire viewport (including on mobile,
+   where the OS chrome is also hidden in true fullscreen) and center the
+   board so it scales to fit rather than being cut off. */
+:fullscreen, ::backdrop { background: #07070f; }
+:fullscreen { display: flex !important; align-items: center; justify-content: center; }
+
+@media (max-width: 640px) {
+  /* Slightly tighter big-icon cards on small phones so 2 fit per row
+     without feeling cramped, while still reading as "big icons". */
+  .game-card-3d { padding-left: 10px !important; padding-right: 10px !important; }
+}

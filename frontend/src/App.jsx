@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useRef, createContext, useContext } from "react";
+import { useState, useEffect, useCallback, useRef, createContext, useContext, Fragment } from "react";
 import { BrowserRouter, Routes, Route, useNavigate, useParams } from "react-router-dom";
 import { api, tokenStore } from "./api.js";
 import { useMultiplayer } from "./useMultiplayer.js";
+import { GameIcon } from "./GameIcons.jsx";
 
 // ══════════════════════════════════════
 // CONFIG & THEME
@@ -253,17 +254,59 @@ function Breadcrumbs({ items }) {
   return (<nav aria-label="Breadcrumb" style={{ padding: "12px 0 8px", fontSize: 12, color: C.textD }}>{items.map((item, i) => (<span key={i}>{i > 0 && <span style={{ margin: "0 6px" }}>/</span>}{item.page ? (<button onClick={() => navigate(item.page)} style={{ background: "none", border: "none", color: C.cyan, fontSize: 12, cursor: "pointer", padding: 0, fontFamily: F }}>{item.label}</button>) : (<span style={{ color: C.textM }}>{item.label}</span>)}</span>))}</nav>);
 }
 
+// Toggle real browser fullscreen on a given element ref — used to let a
+// game fill the entire screen (esp. useful on mobile, where the address
+// bar/chrome otherwise eats a big chunk of a small viewport).
+function useFullscreen(ref) {
+  const [active, setActive] = useState(false);
+  useEffect(() => {
+    const onChange = () => setActive(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+  const toggle = useCallback(() => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.();
+    } else {
+      ref.current?.requestFullscreen?.().catch(() => {});
+    }
+  }, [ref]);
+  return [active, toggle];
+}
+
 function GS({ id, title, accent, guide, children }) {
+  const g = GAMES.find(x => x.id === id);
+  const stageRef = useRef(null);
+  const [fs, toggleFs] = useFullscreen(stageRef);
   return (<main style={{ maxWidth: 860, margin: "0 auto", padding: "0 16px 48px", fontFamily: F }}>
     <Breadcrumbs items={[{ label: "Home", page: "portal" }, { label: title }]} />
     <AdSlot format="leaderboard" />
-    <h1 style={{ fontSize: "clamp(22px,5vw,32px)", fontWeight: 800, color: accent, margin: "8px 0 16px" }}>{title}</h1>
+    <div style={{ display: "flex", alignItems: "center", gap: 14, margin: "8px 0 16px" }}>
+      {g && <GameIcon id={g.id} cat={g.cat} size={52} rounded={16} />}
+      <h1 style={{ fontSize: "clamp(22px,5vw,32px)", fontWeight: 800, color: accent, margin: 0 }}>{title}</h1>
+    </div>
     <SignInPrompt />
-    <section aria-label={`${title} game`}>{children}</section>
+    <div
+      ref={stageRef}
+      style={fs ? { background: C.bg, minHeight: "100vh", width: "100vw", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 16 } : undefined}
+    >
+      <div style={{ display: "flex", justifyContent: fs ? "center" : "flex-end", marginBottom: fs ? 14 : 10 }}>
+        <button
+          onClick={toggleFs}
+          aria-label={fs ? "Exit full screen" : "Play full screen"}
+          style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: "pointer", background: C.card, color: C.textM, border: `1px solid ${C.border}`, fontFamily: F }}
+        >
+          {fs ? "⤢ Exit Full Screen" : "⛶ Play Full Screen"}
+        </button>
+      </div>
+      <section aria-label={`${title} game`} style={fs ? { width: "100%", maxWidth: 520 } : undefined}>{children}</section>
+    </div>
+    {!fs && <>
     <AdSlot format="rectangle" style={{ margin: "28px auto" }} />
     {guide && (<section style={{ marginTop: 28 }}><h2 style={{ fontSize: 18, fontWeight: 700, color: C.text, marginBottom: 12, paddingBottom: 8, borderBottom: `1px solid ${C.border}` }}>How to Play {title}</h2><div style={{ color: C.textM, fontSize: 14, lineHeight: 1.75 }}>{guide}</div></section>)}
-    {GAMES.find(g => g.id === id)?.longDesc && (<section style={{ marginTop: 20, padding: 20, background: C.card, borderRadius: 12, border: `1px solid ${C.border}` }}><h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, margin: "0 0 6px" }}>About {title}</h3><p style={{ margin: 0, fontSize: 13, color: C.textM, lineHeight: 1.7 }}>{GAMES.find(g => g.id === id).longDesc}</p></section>)}
+    {g?.longDesc && (<section style={{ marginTop: 20, padding: 20, background: C.card, borderRadius: 12, border: `1px solid ${C.border}` }}><h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, margin: "0 0 6px" }}>About {title}</h3><p style={{ margin: 0, fontSize: 13, color: C.textM, lineHeight: 1.7 }}>{g.longDesc}</p></section>)}
     <AdSlot format="leaderboard" />
+    </>}
   </main>);
 }
 
@@ -1713,36 +1756,37 @@ function Portal() {
   const cats = ["All", "Strategy", "Puzzle", "Action", "Kids"];
   const filtered = filter === "All" ? GAMES : GAMES.filter(g => g.cat === filter);
   return (<main>
-    <section style={{ textAlign: "center", padding: "48px 16px 24px", background: "radial-gradient(ellipse at 50% 0%,rgba(139,92,246,0.12) 0%,transparent 70%)" }}>
+    <section style={{ textAlign: "center", padding: "56px 16px 32px", position: "relative", overflow: "hidden", background: "radial-gradient(ellipse 80% 60% at 20% -10%,rgba(139,92,246,0.28) 0%,transparent 60%),radial-gradient(ellipse 70% 60% at 85% 0%,rgba(6,182,212,0.22) 0%,transparent 60%),radial-gradient(ellipse 60% 50% at 50% 100%,rgba(245,158,11,0.14) 0%,transparent 60%)" }}>
       <div style={{ fontSize: "clamp(40px,9vw,60px)", marginBottom: 8 }}>🕹️</div>
-      <h1 style={{ fontSize: "clamp(28px,6vw,44px)", fontWeight: 900, margin: "0 0 8px", background: "linear-gradient(135deg,#8b5cf6,#06b6d4,#f59e0b)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", fontFamily: F }}>{SITE.name}</h1>
-      <p style={{ color: C.textM, fontSize: "clamp(14px,3vw,17px)", maxWidth: 540, margin: "0 auto 8px", fontFamily: F, lineHeight: 1.5 }}>Free classic & educational games at {SITE.domain}. Play solo, locally with a friend, or online against another registered player.</p>
-      <p style={{ color: C.textD, fontSize: 12, fontFamily: F }}>{GAMES.length} games · Classic & Kids · Solo, Local & Online Multiplayer · Leaderboards</p>
+      <h1 style={{ fontSize: "clamp(30px,7vw,52px)", fontWeight: 900, margin: "0 0 10px", letterSpacing: "-0.02em", background: "linear-gradient(135deg,#c4b5fd,#67e8f9 45%,#fcd34d)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", fontFamily: F }}>{SITE.name}</h1>
+      <p style={{ color: C.textM, fontSize: "clamp(14px,3vw,17px)", maxWidth: 560, margin: "0 auto 10px", fontFamily: F, lineHeight: 1.5 }}>Free classic & educational games at {SITE.domain}. Play solo, locally with a friend, or online against another registered player.</p>
+      <p style={{ color: C.textD, fontSize: 12, fontFamily: F, marginBottom: 4 }}>{GAMES.length} games · Classic & Kids · Solo, Local & Online Multiplayer · Leaderboards</p>
       {user ? (
         <p style={{ color: C.violet, fontSize: 13, fontFamily: F, marginTop: 8 }}>Welcome back, {user.displayName}! 🕹️</p>
       ) : (
-        <button onClick={() => navigate("auth")} style={{ marginTop: 12, padding: "9px 24px", borderRadius: 8, background: "transparent", border: `1px solid ${C.violet}60`, color: C.violet, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: F }}>Sign in to save scores & play online</button>
+        <button onClick={() => navigate("auth")} style={{ marginTop: 14, padding: "11px 28px", borderRadius: 24, background: "linear-gradient(135deg,#8b5cf6,#06b6d4)", border: "none", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: F, boxShadow: "0 8px 24px rgba(139,92,246,0.35)" }}>Sign in to save scores & play online</button>
       )}
     </section>
     <AdSlot format="leaderboard" />
-    <div style={{ display: "flex", justifyContent: "center", gap: 8, padding: "0 16px", marginBottom: 20, flexWrap: "wrap" }}>
-      {cats.map(c => (<button key={c} onClick={() => setFilter(c)} style={{ padding: "7px 16px", borderRadius: 20, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: F, background: filter === c ? (catC[c] || C.violet) : C.card, color: filter === c ? "#fff" : C.textM, border: `1px solid ${filter === c ? (catC[c] || C.violet) : C.border}` }}>{c}{c === "Kids" ? " 🧒" : ""}</button>))}
+    <div style={{ display: "flex", justifyContent: "center", gap: 8, padding: "0 16px", marginBottom: 24, flexWrap: "wrap" }}>
+      {cats.map(c => (<button key={c} onClick={() => setFilter(c)} style={{ padding: "8px 18px", borderRadius: 20, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: F, background: filter === c ? (catC[c] || C.violet) : C.card, color: filter === c ? "#fff" : C.textM, border: `1px solid ${filter === c ? (catC[c] || C.violet) : C.border}`, boxShadow: filter === c ? `0 6px 16px ${(catC[c] || C.violet)}50` : "none", transition: "all .15s" }}>{c}{c === "Kids" ? " 🧒" : ""}</button>))}
     </div>
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))", gap: 12, padding: "0 16px", maxWidth: 960, margin: "0 auto" }}>
-      {filtered.map((g, idx) => { const color = catC[g.cat] || C.violet; return (<div key={g.id}>
-        <button onClick={() => navigate(`game:${g.id}`)} style={{ width: "100%", background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 18, cursor: "pointer", textAlign: "left", fontFamily: F, display: "flex", flexDirection: "column", gap: 6, transition: "all .2s" }}
-          onMouseEnter={e => { e.currentTarget.style.background = C.cardH; e.currentTarget.style.borderColor = color + "50"; e.currentTarget.style.transform = "translateY(-2px)"; }}
-          onMouseLeave={e => { e.currentTarget.style.background = C.card; e.currentTarget.style.borderColor = C.border; e.currentTarget.style.transform = "none"; }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-            <span style={{ fontSize: 28 }}>{g.emoji}</span>
-            <span style={{ fontSize: 10, fontWeight: 600, color, background: `${color}10`, padding: "3px 10px", borderRadius: 10, textTransform: "uppercase", letterSpacing: 1 }}>{g.cat}{g.age ? ` · ${g.age}` : ""}</span>
-          </div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: C.text }}>{g.name}</div>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(190px,1fr))", gap: 16, padding: "0 16px", maxWidth: 1080, margin: "0 auto" }}>
+      {filtered.map((g, idx) => { const color = catC[g.cat] || C.violet; return (<Fragment key={g.id}>
+        <button
+          onClick={() => navigate(`game:${g.id}`)}
+          className="game-card-3d"
+          style={{ width: "100%", background: `linear-gradient(160deg,${color}22,${C.card} 55%)`, border: `1px solid ${color}35`, borderRadius: 20, padding: "22px 16px 16px", cursor: "pointer", textAlign: "center", fontFamily: F, display: "flex", flexDirection: "column", alignItems: "center", gap: 8, transition: "transform .25s cubic-bezier(.2,.8,.2,1), box-shadow .25s, border-color .25s" }}
+          onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-6px) scale(1.035)"; e.currentTarget.style.boxShadow = `0 20px 40px -12px ${color}55`; e.currentTarget.style.borderColor = color + "80"; }}
+          onMouseLeave={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.borderColor = color + "35"; }}>
+          <GameIcon id={g.id} cat={g.cat} size={72} />
+          <div style={{ fontSize: 10, fontWeight: 700, color, background: `${color}18`, padding: "3px 10px", borderRadius: 10, textTransform: "uppercase", letterSpacing: 1, marginTop: 2 }}>{g.cat}{g.age ? ` · ${g.age}` : ""}</div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: C.text }}>{g.name}</div>
           <div style={{ fontSize: 12, color: C.textM, lineHeight: 1.4 }}>{g.desc}</div>
-          <div style={{ fontSize: 11, color: C.textD, marginTop: "auto", paddingTop: 4 }}>👥 {g.players} player{g.players !== "1" ? "s" : ""}{user?.scores?.[g.id] ? ` · 🏆 ${user.scores[g.id]} pts` : ""}</div>
+          <div style={{ fontSize: 11, color: C.textD, marginTop: "auto", paddingTop: 6 }}>👥 {g.players} player{g.players !== "1" ? "s" : ""}{user?.scores?.[g.id] ? ` · 🏆 ${user.scores[g.id]} pts` : ""}</div>
         </button>
-        {(idx + 1) % 4 === 0 && idx < filtered.length - 1 && <AdSlot format="rectangle" style={{ marginTop: 12 }} />}
-      </div>); })}
+        {(idx + 1) % 6 === 0 && idx < filtered.length - 1 && <AdSlot format="rectangle" style={{ marginTop: 12, gridColumn: "1 / -1" }} />}
+      </Fragment>); })}
     </div>
     <section style={{ maxWidth: 800, margin: "36px auto 0", padding: "0 16px", fontFamily: F }}>
       <h2 style={{ fontSize: 20, fontWeight: 700, color: C.text, marginBottom: 10 }}>Play Free Games Online at {SITE.domain}</h2>

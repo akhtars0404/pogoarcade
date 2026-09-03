@@ -1,3 +1,8 @@
+# Not the active deployment path (see the root README — this project deploys
+# via GCP Cloud Build/Cloud Run), kept only as a reference for an alternate
+# host. The backend now uses Cloud SQL (Postgres) instead of a local SQLite
+# file, so it needs a reachable Postgres instance and these DB_* vars set to
+# match it — no local disk needed any more.
 services:
   - type: web
     name: pogoarcade-backend
@@ -10,9 +15,13 @@ services:
         generateValue: true
       - key: CORS_ORIGIN
         value: https://pogoarcade.com
-      - key: DB_PATH
-        value: /var/data/pogoarcade.db
-    disk:
-      name: pogoarcade-data
-      mountPath: /var/data
-      sizeGB: 1
+      - key: DB_HOST
+        value: replace-with-your-postgres-host
+      - key: DB_PORT
+        value: "5432"
+      - key: DB_NAME
+        value: pogoarcade
+      - key: DB_USER
+        value: pogoarcade
+      - key: DB_PASSWORD
+        sync: false

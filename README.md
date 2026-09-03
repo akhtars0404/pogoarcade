@@ -11,13 +11,14 @@ Dots & Boxes).
 
 ```
 pogoarcade/
-  backend/    Node.js + Express + Socket.io + SQLite — auth, leaderboard, multiplayer
+  backend/    Node.js + Express + Socket.io + Postgres (Cloud SQL) — auth, leaderboard, multiplayer
   frontend/   React + Vite + react-router-dom — the game portal itself
 ```
 
 Two separate deployables. The frontend is a static site; the backend is a
-small always-on Node process (it needs to stay running for Socket.io and to
-keep the SQLite file on disk).
+small always-on Node process (it needs to stay running for Socket.io) that
+talks to a Cloud SQL Postgres instance for everything durable — accounts,
+scores, login history.
 
 ## How online multiplayer works (read this before extending it)
 
@@ -54,9 +55,14 @@ solo/local for now.
 ```bash
 cd backend
 npm install
-cp .env.example .env      # edit JWT_SECRET at minimum
+cp .env.example .env      # edit JWT_SECRET, and point DB_* at a local Postgres
 npm run dev                 # http://localhost:4000
 ```
+Needs a Postgres to talk to — the simplest local option is
+`createdb pogoarcade` against a locally installed Postgres, then set
+`DB_HOST=localhost`, `DB_USER`/`DB_PASSWORD` to match in `.env`. The backend
+creates its own tables on boot (`initSchema()` in `src/db.js`), so an empty
+database is fine to start from.
 
 **Frontend** (in a second terminal):
 ```bash
@@ -81,20 +87,35 @@ the frontend and backend together (see the root `Dockerfile`: it builds
 serves the API, Socket.io, *and* those static assets, all from one
 container). `cloudbuild.yaml` at the repo root builds and deploys it.
 
-### Why one instance, not autoscaled
+### Data storage: Cloud SQL (Postgres), not a local file
 
-The backend keeps user accounts and scores in a local SQLite file inside
-the container. Cloud Run can run many instances of a service in parallel
-and can scale a service to zero when idle — either of those would fragment
-or wipe that data (multiple instances = multiple disconnected databases;
-scale-to-zero = a fresh, empty disk on the next cold start). `cloudbuild.yaml`
-pins the service to exactly **one always-on instance**
-(`--min-instances 1 --max-instances 1`) so the SQLite file stays put across
-normal traffic. The trade-off, carried over from the original design: data
-still resets on a *redeploy* (a new container image = a new empty disk), and
-this can't scale past one instance. That's fine while the site is new; if
-it later needs both real growth and zero data-loss risk, migrate to Cloud
-SQL (Postgres) — a bigger change, not needed to launch.
+User accounts, scores, login history, and password-reset tokens live in a
+Cloud SQL Postgres instance — a separate, durable GCP service — not on the
+Cloud Run container's own disk. This project originally used a SQLite file
+sitting on that local disk, which caused real data loss in practice: Cloud
+Run wipes a container's local filesystem every time it replaces that
+container instance, and that can happen at *any* time — not just on a
+redeploy, but on a crash or routine infrastructure-side instance recycling.
+Accounts were disappearing minutes after being created. Cloud SQL fixes
+this because it's not tied to the Cloud Run container's lifecycle at all;
+the app connects to it fresh on every boot the same way, and the data is
+simply still there.
+
+See "Cloud SQL setup" below to provision the instance this depends on —
+required before the app will boot successfully in production, since
+`backend/src/server.js` won't start listening until it can reach the
+database and create its tables.
+
+### Why still one instance, not autoscaled
+
+`cloudbuild.yaml` still pins the service to exactly **one always-on
+instance** (`--min-instances 1 --max-instances 1`), but for a different
+reason than before: real-time multiplayer (Socket.io room/matchmaking
+state) lives in that one process's memory, not the database, so two
+instances couldn't match players against each other. If this ever needs to
+scale past one instance, that requires a shared Socket.io adapter (e.g.
+Redis) — a separate future upgrade, not needed to launch. The database
+itself has no such limit; Cloud SQL handles concurrent connections fine.
 
 ### First-time GCP setup (one-time only — run these in Cloud Shell)
 
@@ -123,6 +144,59 @@ gcloud builds triggers create github \
   --build-config=cloudbuild.yaml \
   --name=pogo-arcade-full-rebuild
 ```
+
+### Cloud SQL setup (required — the app won't boot without this)
+
+Also one-time, also from Cloud Shell. This creates the Postgres instance
+`cloudbuild.yaml` already expects (it references it as `pogo-db` and passes
+`--add-cloudsql-instances` + `DB_HOST`/`DB_NAME`/`DB_USER`/`DB_PASSWORD`
+automatically on every deploy — nothing else to wire up after this):
+
+```bash
+# 1. Create the Cloud SQL Postgres instance. This takes several minutes —
+#    it's provisioning a real managed database server, not a container.
+#    db-f1-micro is the cheapest tier; fine for a new site's traffic level,
+#    resizable later without losing data if it needs more.
+gcloud sql instances create pogo-db \
+  --database-version=POSTGRES_15 \
+  --tier=db-f1-micro \
+  --region=us-central1 \
+  --storage-size=10GB \
+  --storage-auto-increase
+
+# 2. Create the database and a dedicated app user (not the default
+#    postgres superuser) inside that instance.
+gcloud sql databases create pogoarcade --instance=pogo-db
+gcloud sql users create pogoarcade --instance=pogo-db --password="$(openssl rand -base64 24)"
+# ⚠️ That password is only shown once, generated inline above and not
+# echoed back — capture it immediately and store it in Secret Manager in
+# the same command, rather than trying to recall it afterward. If you'd
+# rather set a password you can see, run instead:
+#   gcloud sql users set-password pogoarcade --instance=pogo-db --password='choose-a-strong-password-here'
+# then use that same value in step 3.
+
+# 3. Store that password in Secret Manager (this is DB_PASSWORD in
+#    cloudbuild.yaml) and let Cloud Run's service account read it — same
+#    pattern as the JWT secret above.
+echo -n "PASTE_THE_PASSWORD_FROM_STEP_2_HERE" | gcloud secrets create pogo-db-password --data-file=-
+PROJECT_NUMBER=$(gcloud projects describe "$(gcloud config get-value project)" --format='value(projectNumber)')
+gcloud secrets add-iam-policy-binding pogo-db-password \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+
+# 4. Let Cloud Run's service account connect to Cloud SQL instances at all
+#    (separate from being able to read the password secret above).
+gcloud projects add-iam-policy-binding "$(gcloud config get-value project)" \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/cloudsql.client"
+```
+
+After this, a normal `gcloud builds submit --config=cloudbuild.yaml .` (or a
+push, if a trigger is watching) picks up `DB_HOST`/`DB_NAME`/`DB_USER`
+automatically from `cloudbuild.yaml` and `DB_PASSWORD` from the secret above
+— no per-deploy steps. If you ever need to inspect the database directly:
+`gcloud sql connect pogo-db --user=pogoarcade --database=pogoarcade` opens a
+`psql` shell against it straight from Cloud Shell.
 
 ### Password reset (Resend) setup — optional, do this whenever you want real email delivery
 
@@ -217,3 +291,9 @@ Still to do before submitting:
   `express-rate-limit` before this is public, to blunt brute-force login
   attempts.
 - **Ad slots are placeholders** — see step 4 above.
+
+Resolved (previously listed here as a known limitation): data used to reset
+whenever Cloud Run replaced the container instance for any reason, not just
+redeploys — real accounts were disappearing minutes after being created.
+Fixed by moving storage from a local SQLite file to Cloud SQL (Postgres);
+see "Data storage: Cloud SQL (Postgres), not a local file" above.

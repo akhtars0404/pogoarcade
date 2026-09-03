@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { Server } from "socket.io";
 import { router } from "./routes.js";
 import { attachMultiplayer, MULTIPLAYER_GAMES } from "./multiplayer.js";
+import { initSchema } from "./db.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Built frontend (frontend/dist) is copied here at image build time so this
@@ -46,6 +47,15 @@ const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: ORIGIN } });
 attachMultiplayer(io);
 
-server.listen(PORT, () => {
-  console.log(`PoGo Arcade backend listening on :${PORT}`);
-});
+// Create/verify tables before accepting traffic — cheap and idempotent
+// (CREATE TABLE IF NOT EXISTS), so this is safe to run on every boot.
+initSchema()
+  .then(() => {
+    server.listen(PORT, () => {
+      console.log(`PoGo Arcade backend listening on :${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error("[server] Failed to initialize database schema:", err);
+    process.exit(1);
+  });

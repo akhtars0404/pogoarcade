@@ -31,19 +31,24 @@ export function attachMultiplayer(io) {
   // roomByCode: code -> roomId (only while waiting for 2nd player)
   const roomByCode = new Map();
 
-  nsp.use((socket, next) => {
-    const token = socket.handshake.auth?.token;
-    const payload = verifySocketToken(token);
-    if (!payload) return next(new Error("Authentication required — please sign in to play online."));
-    const user = getUserById(payload.sub);
-    if (!user) return next(new Error("Account not found"));
-    if (user.disabled) return next(new Error("This account has been disabled"));
-    socket.data.user = {
-      id: user.id,
-      username: user.username,
-      displayName: user.display_name,
-    };
-    next();
+  nsp.use(async (socket, next) => {
+    try {
+      const token = socket.handshake.auth?.token;
+      const payload = verifySocketToken(token);
+      if (!payload) return next(new Error("Authentication required — please sign in to play online."));
+      const user = await getUserById(payload.sub);
+      if (!user) return next(new Error("Account not found"));
+      if (user.disabled) return next(new Error("This account has been disabled"));
+      socket.data.user = {
+        id: user.id,
+        username: user.username,
+        displayName: user.display_name,
+      };
+      next();
+    } catch (err) {
+      console.error("[multiplayer] auth error", err);
+      next(new Error("Server error — please try again"));
+    }
   });
 
   function leaveQueues(socket) {
@@ -160,7 +165,7 @@ export function attachMultiplayer(io) {
 
     // Client-reported game end (turn-based games run rule logic client-side).
     // Each client reports its own outcome; server awards points once per room.
-    socket.on("game:over", ({ roomId, outcome, points } = {}) => {
+    socket.on("game:over", async ({ roomId, outcome, points } = {}) => {
       const room = rooms.get(roomId);
       if (!room || room.finished) return;
       const me = room.players.find((p) => p.socketId === socket.id);
@@ -169,9 +174,9 @@ export function attachMultiplayer(io) {
       const clamped = Math.max(0, Math.min(200, Math.round(Number(points) || 0)));
       if (clamped > 0) {
         try {
-          recordScore(me.id, room.gameId, clamped);
-        } catch {
-          /* best-effort */
+          await recordScore(me.id, room.gameId, clamped);
+        } catch (err) {
+          console.error("[multiplayer] recordScore failed", err); // best-effort
         }
       }
       nsp.to(roomId).emit("room:finished", { by: me.username, outcome });

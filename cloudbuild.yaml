@@ -18,16 +18,24 @@ steps:
       - 'us-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web'
 
   # Step 3: Deploy to Cloud Run in us-central1 (supports domain mapping).
-  # min-instances=1/max-instances=1 pins this to exactly one always-on
-  # instance, since the backend keeps its user/score database in a local
-  # SQLite file on the container's disk — running more than one instance
-  # (or scaling to zero between requests) would fragment or lose that data.
-  # See README.md for the trade-offs and the path to Cloud SQL later.
+  #
+  # min-instances=1/max-instances=1 stays pinned to exactly one instance —
+  # NOT because of the database anymore (accounts/scores now live in Cloud
+  # SQL, which is a separate durable service and survives instance restarts
+  # fine), but because of Socket.io: the real-time multiplayer room/queue
+  # state lives in this process's memory, and two instances couldn't match
+  # players against each other without a shared adapter (e.g. Redis), which
+  # is a separate future upgrade if this needs to scale.
+  #
+  # --add-cloudsql-instances gives this service a Unix socket at
+  # /cloudsql/<connection-name> for the Cloud SQL instance created per the
+  # README's Cloud SQL setup steps — no Cloud SQL Auth Proxy sidecar needed,
+  # Cloud Run manages that connection itself.
   #
   # --update-env-vars / --update-secrets MERGE into the service's existing
-  # config instead of replacing it, so JWT_SECRET (set once, manually or via
-  # Secret Manager — see README "First-time GCP setup") survives every
-  # automated redeploy from this pipeline.
+  # config instead of replacing it, so JWT_SECRET, DB_PASSWORD, etc. (set
+  # once via Secret Manager — see README "First-time GCP setup") survive
+  # every automated redeploy from this pipeline.
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:
@@ -49,10 +57,12 @@ steps:
       - '1'
       - '--max-instances'
       - '1'
+      - '--add-cloudsql-instances'
+      - '$PROJECT_ID:us-central1:pogo-db'
       - '--update-env-vars'
-      - 'NODE_ENV=production,DB_PATH=/app/data/pogoarcade.db,CORS_ORIGIN=*'
+      - 'NODE_ENV=production,CORS_ORIGIN=*,DB_HOST=/cloudsql/$PROJECT_ID:us-central1:pogo-db,DB_NAME=pogoarcade,DB_USER=pogoarcade'
       - '--update-secrets'
-      - 'JWT_SECRET=pogo-jwt-secret:latest'
+      - 'JWT_SECRET=pogo-jwt-secret:latest,DB_PASSWORD=pogo-db-password:latest'
 
 images:
   - 'us-docker.pkg.dev/$PROJECT_ID/pogo-arcade/web:$BUILD_ID'

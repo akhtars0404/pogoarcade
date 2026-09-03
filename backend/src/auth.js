@@ -33,18 +33,23 @@ export function verifyToken(token) {
 // Express middleware: requires a valid Bearer token. Re-checks the live DB
 // row (not just the JWT payload) so a disabled account is rejected
 // immediately, even with a still-valid token from before it was disabled.
-export function requireAuth(req, res, next) {
-  const header = req.headers.authorization || "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
-  const payload = token && verifyToken(token);
-  if (!payload) return res.status(401).json({ error: "Not authenticated" });
-  const user = getUserById(payload.sub);
-  if (!user) return res.status(401).json({ error: "Not authenticated" });
-  if (user.disabled) return res.status(403).json({ error: "This account has been disabled" });
-  req.userId = user.id;
-  req.username = user.username;
-  req.userRole = user.role;
-  next();
+export async function requireAuth(req, res, next) {
+  try {
+    const header = req.headers.authorization || "";
+    const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+    const payload = token && verifyToken(token);
+    if (!payload) return res.status(401).json({ error: "Not authenticated" });
+    const user = await getUserById(payload.sub);
+    if (!user) return res.status(401).json({ error: "Not authenticated" });
+    if (user.disabled) return res.status(403).json({ error: "This account has been disabled" });
+    req.userId = user.id;
+    req.username = user.username;
+    req.userRole = user.role;
+    next();
+  } catch (err) {
+    console.error("[auth] requireAuth error", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
 }
 
 // Express middleware: requires an authenticated admin. Always run after
